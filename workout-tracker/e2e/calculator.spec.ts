@@ -97,11 +97,11 @@ test.describe('Plate Calculator', () => {
   test('handles complex plate combinations', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { calculatePlates } = await import('/src/logic/calculator.ts');
-      // 260 - 45 = 215, per side = 107.5 → 45 + 35 + 25 + 2.5
+      // 260 - 45 = 215, per side = 107.5 → 45 + 45 + 10 + 5 + 2.5 (greedy)
       return calculatePlates(260);
     });
 
-    expect(result.plates).toEqual([45, 35, 25, 2.5]);
+    expect(result.plates).toEqual([45, 45, 10, 5, 2.5]);
     expect(result.remainder).toBe(0);
   });
 

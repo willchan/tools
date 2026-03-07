@@ -1,0 +1,54 @@
+name: Update Playwright Snapshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'workout-tracker/src/**'
+      - 'workout-tracker/public/**'
+      - 'workout-tracker/e2e/**'
+
+jobs:
+  update-snapshots:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workout-tracker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps chromium
+
+      - name: Update snapshots
+        run: bunx playwright test --update-snapshots --grep "visual snapshot"
+
+      - name: Check for snapshot changes
+        id: changes
+        run: |
+          cd ..
+          git add -N .
+          if git diff --quiet -- 'workout-tracker/e2e/**/*-snapshots/**'; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push updated snapshots
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          cd ..
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add 'workout-tracker/e2e/**/*-snapshots/**'
+          git commit -m "chore: update Playwright visual snapshots [skip ci]"
+          git push
