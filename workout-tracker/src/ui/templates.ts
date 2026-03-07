@@ -1,4 +1,4 @@
-import { getAllTemplates, getAllExercises, putTemplate, getState, putState } from '../db/database';
+import { getAllTemplates, getAllExercises, putTemplate, deleteTemplate, getState, putState } from '../db/database';
 import type { Template, TemplateSet, TemplateDay, Exercise } from '../db/types';
 import { navigate } from './router';
 
@@ -147,7 +147,10 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
   main.className = 'templates-screen';
 
   if (templates.length === 0) {
-    main.innerHTML = '<p>No templates yet.</p>';
+    const empty = document.createElement('p');
+    empty.className = 'templates-empty';
+    empty.textContent = 'No templates yet. Create one to get started.';
+    main.appendChild(empty);
   } else {
     const list = document.createElement('div');
     list.className = 'template-list';
@@ -159,7 +162,10 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
       card.innerHTML = `
         <h3>${t.name}</h3>
         <p>${t.weeks.length} weeks · ${t.weeks[0]?.days.length ?? 0} days/week</p>
-        <button class="btn btn-secondary edit-template-btn" data-id="${t.id}">Edit</button>
+        <div class="template-card-actions">
+          <button class="btn btn-secondary edit-template-btn" data-id="${t.id}">Edit</button>
+          <button class="btn btn-danger delete-template-btn" data-id="${t.id}">Delete</button>
+        </div>
       `;
       list.appendChild(card);
     }
@@ -195,6 +201,25 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
     btn.addEventListener('click', () => {
       const id = (btn as HTMLElement).dataset.id!;
       navigate('template-edit', { id });
+    });
+  });
+
+  main.querySelectorAll('.delete-template-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = (btn as HTMLElement).dataset.id!;
+      const name = templates.find((t) => t.id === id)?.name ?? 'this template';
+      if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+
+      await deleteTemplate(id);
+
+      // If the deleted template was the active one, clear it from state
+      const state = await getState();
+      if (state?.templateId === id) {
+        const remaining = await getAllTemplates();
+        await putState({ ...state, templateId: remaining[0]?.id ?? '' });
+      }
+
+      await renderTemplates(container);
     });
   });
 

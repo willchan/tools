@@ -79,4 +79,28 @@ test.describe('Template Management', () => {
       maxDiffPixelRatio: 0.05,
     });
   });
+
+  test('each template card has a delete button', async ({ page }) => {
+    const deleteBtn = page.locator('.delete-template-btn');
+    await expect(deleteBtn).toHaveCount(1);
+  });
+
+  test('deleting a template removes it from the list', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.click('.delete-template-btn');
+    await expect(page.locator('.template-card')).toHaveCount(0);
+  });
+
+  test('deleting the last template shows the empty state', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.click('.delete-template-btn');
+    await expect(page.locator('.templates-empty')).toBeVisible();
+    await expect(page.locator('.templates-empty')).toContainText('No templates');
+  });
+
+  test('cancelling deletion keeps the template', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.dismiss());
+    await page.click('.delete-template-btn');
+    await expect(page.locator('.template-card')).toHaveCount(1);
+  });
 });
