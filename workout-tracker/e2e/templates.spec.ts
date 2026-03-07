@@ -68,6 +68,11 @@ test.describe('Template Management', () => {
     await expect(addBtn).toHaveText('Create New Template');
   });
 
+  test('create new template button navigates to template editor', async ({ page }) => {
+    await page.locator('#add-template-btn').click();
+    await expect(page.locator('h1')).toHaveText('Edit Template');
+  });
+
   test('visual snapshot of templates screen', async ({ page }) => {
     await page.waitForTimeout(300);
     await expect(page).toHaveScreenshot('templates-screen.png', {

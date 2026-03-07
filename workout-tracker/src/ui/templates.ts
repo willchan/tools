@@ -161,6 +161,8 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
   // Listeners
   document.getElementById('back-btn')?.addEventListener('click', () => navigate('home'));
 
+  document.getElementById('add-template-btn')?.addEventListener('click', () => navigate('template-edit'));
+
   main.querySelectorAll('.edit-template-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = (btn as HTMLElement).dataset.id!;
