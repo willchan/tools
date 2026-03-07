@@ -172,9 +172,15 @@ export async function importAll(data: AppData): Promise<void> {
 // --- Seed defaults if empty ---
 export async function seedDefaults(): Promise<void> {
   const exercises = await getAllExercises();
+  const defaults = getDefaultExercises();
   if (exercises.length === 0) {
-    const defaults = getDefaultExercises();
     for (const e of defaults) await putExercise(e);
+  } else {
+    // Add any missing default exercises (e.g. newly added exercises like Dragon Flag)
+    const existingIds = new Set(exercises.map((e) => e.id));
+    for (const e of defaults) {
+      if (!existingIds.has(e.id)) await putExercise(e);
+    }
   }
 
   const templates = await getAllTemplates();
