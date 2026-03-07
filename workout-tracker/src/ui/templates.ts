@@ -1,6 +1,106 @@
 import { getAllTemplates, getAllExercises, putTemplate, getState, putState } from '../db/database';
-import type { TemplateSet, Exercise } from '../db/types';
+import type { Template, TemplateSet, TemplateDay, Exercise } from '../db/types';
 import { navigate } from './router';
+
+/**
+ * Returns the index of a set among only the accessory sets (tmPercentage === null)
+ * within a day. Returns -1 if the set is not an accessory.
+ */
+function accessoryIndex(day: TemplateDay, setIndex: number): number {
+  if (day.sets[setIndex]?.tmPercentage !== null) return -1;
+  let idx = 0;
+  for (let i = 0; i < setIndex; i++) {
+    if (day.sets[i].tmPercentage === null) idx++;
+  }
+  return idx;
+}
+
+/**
+ * Find the absolute set index for the Nth accessory set in a day.
+ * Returns -1 if no accessory at that position exists.
+ */
+function setIndexForAccessory(day: TemplateDay, accIdx: number): number {
+  let count = 0;
+  for (let i = 0; i < day.sets.length; i++) {
+    if (day.sets[i].tmPercentage === null) {
+      if (count === accIdx) return i;
+      count++;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Propagate a change to matching accessory sets across all other weeks.
+ * "Matching" = same day index with same mainLiftId, same accessory position.
+ */
+function propagateAccessoryChange(
+  template: Template,
+  sourceWi: number,
+  sourceDi: number,
+  sourceSi: number,
+  updater: (set: TemplateSet) => void
+): void {
+  const sourceDay = template.weeks[sourceWi].days[sourceDi];
+  const accIdx = accessoryIndex(sourceDay, sourceSi);
+  if (accIdx < 0) return; // not an accessory — don't propagate
+
+  const mainLiftId = sourceDay.mainLiftId;
+
+  for (let wi = 0; wi < template.weeks.length; wi++) {
+    if (wi === sourceWi) continue;
+    for (const day of template.weeks[wi].days) {
+      if (day.mainLiftId !== mainLiftId) continue;
+      const targetSi = setIndexForAccessory(day, accIdx);
+      if (targetSi >= 0) updater(day.sets[targetSi]);
+    }
+  }
+}
+
+/**
+ * Propagate adding an accessory set to matching days in other weeks.
+ */
+function propagateAccessoryAdd(
+  template: Template,
+  sourceWi: number,
+  sourceDi: number,
+  newSet: TemplateSet
+): void {
+  const mainLiftId = template.weeks[sourceWi].days[sourceDi].mainLiftId;
+
+  for (let wi = 0; wi < template.weeks.length; wi++) {
+    if (wi === sourceWi) continue;
+    for (const day of template.weeks[wi].days) {
+      if (day.mainLiftId !== mainLiftId) continue;
+      day.sets.push({ ...newSet });
+    }
+  }
+}
+
+/**
+ * Propagate removing an accessory set to matching days in other weeks.
+ */
+function propagateAccessoryRemove(
+  template: Template,
+  sourceWi: number,
+  sourceDi: number,
+  sourceSi: number
+): void {
+  const sourceDay = template.weeks[sourceWi].days[sourceDi];
+  const accIdx = accessoryIndex(sourceDay, sourceSi);
+  if (accIdx < 0) return;
+
+  const mainLiftId = sourceDay.mainLiftId;
+
+  for (let wi = 0; wi < template.weeks.length; wi++) {
+    if (wi === sourceWi) continue;
+    for (const day of template.weeks[wi].days) {
+      if (day.mainLiftId !== mainLiftId) continue;
+      const targetSi = setIndexForAccessory(day, accIdx);
+      if (targetSi >= 0) day.sets.splice(targetSi, 1);
+    }
+  }
+}
 
 export async function renderTemplates(container: HTMLElement): Promise<void> {
   const templates = await getAllTemplates();
@@ -193,10 +293,17 @@ export async function renderTemplateEdit(
     wi: number,
     di: number
   ): string {
+    const isMultiWeek = template!.weeks.length > 1;
     return sets
       .map(
-        (set, si) => `
-      <div class="set-editor-row" data-testid="set-row-${wi}-${di}-${si}">
+        (set, si) => {
+          const isAccessory = set.tmPercentage === null;
+          const linkedHtml = isAccessory && isMultiWeek
+            ? `<span class="linked-indicator" title="Linked across all weeks">&#x1f517;</span>`
+            : '';
+          return `
+      <div class="set-editor-row${isAccessory ? ' accessory-set' : ''}" data-testid="set-row-${wi}-${di}-${si}">
+        ${linkedHtml}
         <select class="set-exercise-select" data-week="${wi}" data-day="${di}" data-set="${si}">
           ${exercises.map((e) => `<option value="${e.id}" ${e.id === set.exerciseId ? 'selected' : ''}>${e.name}</option>`).join('')}
         </select>
@@ -208,7 +315,8 @@ export async function renderTemplateEdit(
         </label>
         <button class="btn btn-small btn-danger remove-set-btn" data-week="${wi}" data-day="${di}" data-set="${si}">×</button>
       </div>
-    `
+    `;
+        }
       )
       .join('');
   }
@@ -251,6 +359,11 @@ export async function renderTemplateEdit(
         const di = parseInt(el.dataset.day!);
         const si = parseInt(el.dataset.set!);
         template!.weeks[wi].days[di].sets[si].exerciseId = el.value;
+        const newValue = el.value;
+        propagateAccessoryChange(template!, wi, di, si, (set) => {
+          set.exerciseId = newValue;
+        });
+        renderWeeks();
       });
     });
 
@@ -261,7 +374,12 @@ export async function renderTemplateEdit(
         const wi = parseInt(el.dataset.week!);
         const di = parseInt(el.dataset.day!);
         const si = parseInt(el.dataset.set!);
-        template!.weeks[wi].days[di].sets[si].reps = parseInt(el.value) || 1;
+        const newReps = parseInt(el.value) || 1;
+        template!.weeks[wi].days[di].sets[si].reps = newReps;
+        propagateAccessoryChange(template!, wi, di, si, (set) => {
+          set.reps = newReps;
+        });
+        renderWeeks();
       });
     });
 
@@ -297,6 +415,7 @@ export async function renderTemplateEdit(
         const wi = parseInt(el.dataset.week!);
         const di = parseInt(el.dataset.day!);
         const si = parseInt(el.dataset.set!);
+        propagateAccessoryRemove(template!, wi, di, si);
         template!.weeks[wi].days[di].sets.splice(si, 1);
         renderWeeks();
       });
@@ -309,13 +428,15 @@ export async function renderTemplateEdit(
         const wi = parseInt(el.dataset.week!);
         const di = parseInt(el.dataset.day!);
         const day = template!.weeks[wi].days[di];
-        day.sets.push({
+        const newSet: TemplateSet = {
           exerciseId: day.mainLiftId,
           tmPercentage: null,
           tmLiftId: null,
           reps: 10,
           isAmrap: false,
-        });
+        };
+        day.sets.push(newSet);
+        propagateAccessoryAdd(template!, wi, di, newSet);
         renderWeeks();
       });
     });
