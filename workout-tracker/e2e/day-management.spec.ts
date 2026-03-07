@@ -150,6 +150,86 @@ test.describe('Template Editor — Day Reorder Propagation Across Weeks', () => 
   });
 });
 
+test.describe('Template Editor — Day Order Normalization on Load', () => {
+  test('normalizes out-of-sync day ordering across weeks when editor opens', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    // Inject a template with out-of-sync day ordering across weeks via IndexedDB
+    await page.evaluate(async () => {
+      const { putTemplate, putState } = await import('/src/db/database.ts');
+
+      // Week 0: Squat, Bench, Deadlift, OHP (canonical order)
+      // Week 1: Bench, Squat, OHP, Deadlift (out of sync!)
+      // Week 2: Deadlift, OHP, Squat, Bench (out of sync!)
+      const template = {
+        id: 'out-of-sync-template',
+        name: 'Out of Sync Template',
+        weeks: [
+          {
+            id: 'w0', name: 'Week 1',
+            days: [
+              { id: 'd0-0', name: 'Squat Day', mainLiftId: 'squat', sets: [] },
+              { id: 'd0-1', name: 'Bench Day', mainLiftId: 'bench', sets: [] },
+              { id: 'd0-2', name: 'Deadlift Day', mainLiftId: 'deadlift', sets: [] },
+              { id: 'd0-3', name: 'OHP Day', mainLiftId: 'ohp', sets: [] },
+            ],
+          },
+          {
+            id: 'w1', name: 'Week 2',
+            days: [
+              { id: 'd1-0', name: 'Bench Day', mainLiftId: 'bench', sets: [] },
+              { id: 'd1-1', name: 'Squat Day', mainLiftId: 'squat', sets: [] },
+              { id: 'd1-2', name: 'OHP Day', mainLiftId: 'ohp', sets: [] },
+              { id: 'd1-3', name: 'Deadlift Day', mainLiftId: 'deadlift', sets: [] },
+            ],
+          },
+          {
+            id: 'w2', name: 'Week 3',
+            days: [
+              { id: 'd2-0', name: 'Deadlift Day', mainLiftId: 'deadlift', sets: [] },
+              { id: 'd2-1', name: 'OHP Day', mainLiftId: 'ohp', sets: [] },
+              { id: 'd2-2', name: 'Squat Day', mainLiftId: 'squat', sets: [] },
+              { id: 'd2-3', name: 'Bench Day', mainLiftId: 'bench', sets: [] },
+            ],
+          },
+        ],
+        cycleLength: 3,
+      };
+      await putTemplate(template);
+      await putState({ templateId: 'out-of-sync-template', cycle: 1, weekIndex: 0, dayIndex: 0 });
+    });
+
+    // Navigate to template editor
+    await page.click('.nav-btn[data-route="templates"]');
+    await page.waitForSelector('.templates-screen');
+
+    // Click edit on the out-of-sync template
+    const editBtns = page.locator('.edit-template-btn');
+    // Find the one for our template
+    const templateCards = page.locator('.template-card');
+    for (let i = 0; i < await templateCards.count(); i++) {
+      const text = await templateCards.nth(i).textContent();
+      if (text?.includes('Out of Sync')) {
+        await templateCards.nth(i).locator('.edit-template-btn').click();
+        break;
+      }
+    }
+    await page.waitForSelector('.template-edit-screen');
+
+    // All weeks should now have the same day ordering as week 0
+    const weeks = page.locator('.week-section');
+    const expectedOrder = ['Squat Day', 'Bench Day', 'Deadlift Day', 'OHP Day'];
+
+    for (let wi = 0; wi < 3; wi++) {
+      for (let di = 0; di < 4; di++) {
+        const dayName = await weeks.nth(wi).locator('.day-name-input').nth(di).inputValue();
+        expect(dayName).toBe(expectedOrder[di]);
+      }
+    }
+  });
+});
+
 test.describe('Home Screen — Day Picker', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');

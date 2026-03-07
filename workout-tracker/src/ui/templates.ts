@@ -3,6 +3,34 @@ import type { Template, TemplateSet, TemplateDay, Exercise } from '../db/types';
 import { navigate } from './router';
 
 /**
+ * Normalize day ordering across all weeks to match week 0's order.
+ * Uses mainLiftId to identify matching days and reorders them.
+ * This fixes old templates where day ordering drifted out of sync across weeks.
+ */
+function normalizeDayOrder(template: Template): void {
+  if (template.weeks.length < 2) return;
+
+  const canonicalOrder = template.weeks[0].days.map((d) => d.mainLiftId);
+
+  for (let wi = 1; wi < template.weeks.length; wi++) {
+    const week = template.weeks[wi];
+    const sorted: TemplateDay[] = [];
+
+    for (const liftId of canonicalOrder) {
+      const day = week.days.find((d) => d.mainLiftId === liftId);
+      if (day) sorted.push(day);
+    }
+
+    // Append any days not found in canonical order (edge case: different day counts)
+    for (const day of week.days) {
+      if (!sorted.includes(day)) sorted.push(day);
+    }
+
+    week.days = sorted;
+  }
+}
+
+/**
  * Returns the index of a set among only the accessory sets (tmPercentage === null)
  * within a day. Returns -1 if the set is not an accessory.
  */
@@ -187,6 +215,9 @@ export async function renderTemplateEdit(
   let template = templates.find((t) => t.id === params.id);
 
   const isNew = !template;
+  if (template) {
+    normalizeDayOrder(template);
+  }
   if (!template) {
     template = {
       id: `template-${Date.now()}`,
