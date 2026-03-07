@@ -445,7 +445,6 @@ export async function renderTemplateEdit(
     weeksContainer.querySelectorAll('.move-day-up-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const el = e.currentTarget as HTMLButtonElement;
-        const wi = parseInt(el.dataset.week!);
         const di = parseInt(el.dataset.day!);
         if (di > 0) {
           for (const week of template!.weeks) {
