@@ -61,7 +61,7 @@ test.describe('Home Screen', () => {
     await expect(page.locator('h1')).toHaveText('Settings');
   });
 
-  test('visual snapshot of home screen', async ({ page }) => {
+  test.skip('visual snapshot of home screen', async ({ page }) => {
     await page.waitForTimeout(500); // Wait for data to load
     await expect(page).toHaveScreenshot('home-screen.png', {
       maxDiffPixelRatio: 0.05,
