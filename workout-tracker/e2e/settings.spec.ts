@@ -67,7 +67,7 @@ test.describe('Settings', () => {
     await expect(notifBtn).toBeVisible();
   });
 
-  test.skip('visual snapshot of settings screen', async ({ page }) => {
+  test('visual snapshot of settings screen', async ({ page }) => {
     await page.waitForTimeout(300);
     await expect(page).toHaveScreenshot('settings-screen.png', {
       maxDiffPixelRatio: 0.05,

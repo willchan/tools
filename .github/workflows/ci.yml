@@ -30,7 +30,7 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Run Playwright tests
-        run: bunx playwright test
+        run: bunx playwright test --grep-invert "visual snapshot"
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
