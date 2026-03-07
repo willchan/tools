@@ -215,7 +215,7 @@ export async function renderTemplateEdit(
   header.className = 'app-header';
   header.innerHTML = `
     <button id="back-btn" class="btn btn-text">&larr; Back</button>
-    <h1>${isNew ? 'New Template' : 'Edit Template'}</h1>
+    <h1>Edit Template</h1>
   `;
   container.appendChild(header);
 
