@@ -1,6 +1,6 @@
 import { getAllTemplates, getAllExercises, putTemplate, deleteTemplate, getState, putState } from '../db/database';
 import type { Template, TemplateSet, TemplateDay, Exercise } from '../db/types';
-import { navigate } from './router';
+import { navigate, type Route } from './router';
 
 /**
  * Normalize day ordering across all weeks to match week 0's order.
@@ -226,7 +226,7 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
   nav.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const route = (btn as HTMLElement).dataset.route;
-      if (route) navigate(route as any);
+      if (route) navigate(route as Route);
     });
   });
 }

@@ -9,7 +9,7 @@ import {
   getAllTemplates,
 } from '../db/database';
 import type { ProgressionState } from '../db/types';
-import { navigate } from './router';
+import { navigate, type Route } from './router';
 import { requestNotificationPermission } from './notifications';
 
 export async function renderSettings(container: HTMLElement): Promise<void> {
@@ -194,7 +194,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   nav.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const route = (btn as HTMLElement).dataset.route;
-      if (route) navigate(route as any);
+      if (route) navigate(route as Route);
     });
   });
 }

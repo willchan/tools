@@ -1,11 +1,9 @@
 import { getAllHistory, putWorkoutLog, getAllTemplates, getState } from '../db/database';
 import type { WorkoutLog } from '../db/types';
-import { navigate } from './router';
+import { navigate, type Route } from './router';
 
 export async function renderHistory(container: HTMLElement): Promise<void> {
-  const history = await getAllHistory();
-  // Sort by most recent first
-  history.sort((a, b) => b.completedAt - a.completedAt);
+  const history = (await getAllHistory()).toSorted((a, b) => b.completedAt - a.completedAt);
 
   container.innerHTML = '';
 
@@ -96,7 +94,7 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
   nav.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const route = (btn as HTMLElement).dataset.route;
-      if (route) navigate(route as any);
+      if (route) navigate(route as Route);
     });
   });
 }

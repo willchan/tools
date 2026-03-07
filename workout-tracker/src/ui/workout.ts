@@ -104,7 +104,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       let repsDisplay = `${set.reps} reps`;
       if (set.isAmrap) repsDisplay += '+';
 
-      let weightDisplay = weight > 0 ? `${weight} lbs` : 'BW / Custom';
+      const weightDisplay = weight > 0 ? `${weight} lbs` : 'BW / Custom';
       let plateDisplay = '';
       if (plates && plates.plates.length > 0) {
         plateDisplay = `<span class="plate-info">${formatPlates(plates.plates)} per side</span>`;
