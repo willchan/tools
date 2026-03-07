@@ -448,8 +448,11 @@ export async function renderTemplateEdit(
         const wi = parseInt(el.dataset.week!);
         const di = parseInt(el.dataset.day!);
         if (di > 0) {
-          const days = template!.weeks[wi].days;
-          [days[di - 1], days[di]] = [days[di], days[di - 1]];
+          for (const week of template!.weeks) {
+            if (di < week.days.length) {
+              [week.days[di - 1], week.days[di]] = [week.days[di], week.days[di - 1]];
+            }
+          }
           renderWeeks();
         }
       });
@@ -461,9 +464,13 @@ export async function renderTemplateEdit(
         const el = e.currentTarget as HTMLButtonElement;
         const wi = parseInt(el.dataset.week!);
         const di = parseInt(el.dataset.day!);
-        const days = template!.weeks[wi].days;
-        if (di < days.length - 1) {
-          [days[di], days[di + 1]] = [days[di + 1], days[di]];
+        const sourceWeek = template!.weeks[wi];
+        if (di < sourceWeek.days.length - 1) {
+          for (const week of template!.weeks) {
+            if (di + 1 < week.days.length) {
+              [week.days[di], week.days[di + 1]] = [week.days[di + 1], week.days[di]];
+            }
+          }
           renderWeeks();
         }
       });
