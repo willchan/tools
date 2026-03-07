@@ -66,6 +66,11 @@ export async function putTemplate(template: Template): Promise<void> {
   await db.put('templates', template);
 }
 
+export async function deleteTemplate(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('templates', id);
+}
+
 // --- Training Maxes ---
 export async function getAllTrainingMaxes(): Promise<TrainingMax[]> {
   const db = await getDB();
