@@ -26,6 +26,9 @@ jobs:
       - name: TypeScript typecheck
         run: bun run typecheck
 
+      - name: Lint
+        run: bun run lint
+
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
 
