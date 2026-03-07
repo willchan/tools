@@ -4,13 +4,20 @@ import {
   exportAll,
   importAll,
   getAllExercises,
+  getState,
+  putState,
+  getAllTemplates,
 } from '../db/database';
+import type { ProgressionState } from '../db/types';
 import { navigate } from './router';
 import { requestNotificationPermission } from './notifications';
 
 export async function renderSettings(container: HTMLElement): Promise<void> {
   const tms = await getAllTrainingMaxes();
   const exercises = await getAllExercises();
+  const state = await getState();
+  const templates = await getAllTemplates();
+  const template = templates.find((t) => t.id === state?.templateId);
 
   container.innerHTML = '';
 
@@ -56,6 +63,34 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   tmForm.appendChild(saveTmBtn);
   tmSection.appendChild(tmForm);
   main.appendChild(tmSection);
+
+  // Progression Override section
+  if (state && template) {
+    const progSection = document.createElement('section');
+    progSection.dataset.testid = 'progression-override';
+    progSection.innerHTML = `
+      <h2>Program Position</h2>
+      <div class="prog-form" data-testid="prog-form">
+        <div class="form-group">
+          <label for="override-cycle">Cycle</label>
+          <input type="number" id="override-cycle" data-testid="override-cycle"
+                 value="${state.cycle}" min="1" step="1" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label for="override-week">Week</label>
+          <input type="number" id="override-week" data-testid="override-week"
+                 value="${state.weekIndex + 1}" min="1" max="${template.weeks.length}" step="1" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label for="override-day">Day</label>
+          <input type="number" id="override-day" data-testid="override-day"
+                 value="${state.dayIndex + 1}" min="1" max="${template.weeks[state.weekIndex]?.days.length ?? 4}" step="1" inputmode="numeric">
+        </div>
+        <button id="save-progression-btn" class="btn btn-primary">Save Position</button>
+      </div>
+    `;
+    main.appendChild(progSection);
+  }
 
   // Notifications section
   const notifSection = document.createElement('section');
@@ -106,6 +141,24 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     setTimeout(() => {
       saveTmBtn.textContent = 'Save Training Maxes';
     }, 1500);
+  });
+
+  document.getElementById('save-progression-btn')?.addEventListener('click', async () => {
+    if (state) {
+      const cycle = parseInt((document.getElementById('override-cycle') as HTMLInputElement).value) || 1;
+      const weekNum = parseInt((document.getElementById('override-week') as HTMLInputElement).value) || 1;
+      const dayNum = parseInt((document.getElementById('override-day') as HTMLInputElement).value) || 1;
+      const newState: ProgressionState = {
+        ...state,
+        cycle,
+        weekIndex: weekNum - 1,
+        dayIndex: dayNum - 1,
+      };
+      await putState(newState);
+      const btn = document.getElementById('save-progression-btn')!;
+      btn.textContent = 'Saved!';
+      setTimeout(() => { btn.textContent = 'Save Position'; }, 1500);
+    }
   });
 
   document.getElementById('enable-notif-btn')?.addEventListener('click', async () => {

@@ -27,6 +27,10 @@ export async function renderHome(container: HTMLElement): Promise<void> {
     const week = template.weeks[state.weekIndex];
     const day = week?.days[state.dayIndex];
 
+    const weekPickerButtons = template.weeks.map((w, i) =>
+      `<button class="week-picker-btn ${i === state.weekIndex ? 'active' : ''}" data-week-index="${i}">${w.name}</button>`
+    ).join('');
+
     const dayPickerButtons = week?.days.map((d, i) =>
       `<button class="day-picker-btn ${i === state.dayIndex ? 'active' : ''}" data-day-index="${i}">${d.name}</button>`
     ).join('') ?? '';
@@ -36,6 +40,7 @@ export async function renderHome(container: HTMLElement): Promise<void> {
       <div class="workout-card" data-testid="next-workout-card">
         <p class="template-name">${template.name}</p>
         <p class="cycle-info">Cycle ${state.cycle} · ${week?.name ?? 'Unknown'}</p>
+        <div class="week-picker" data-testid="week-picker">${weekPickerButtons}</div>
         <div class="day-picker" data-testid="day-picker">${dayPickerButtons}</div>
         <p class="day-name">${day?.name ?? 'Unknown'}</p>
         <button id="start-workout-btn" class="btn btn-primary btn-large">
@@ -89,6 +94,18 @@ export async function renderHome(container: HTMLElement): Promise<void> {
 
   const setupBtn = document.getElementById('setup-template-btn');
   setupBtn?.addEventListener('click', () => navigate('templates'));
+
+  // Week picker — allow selecting a different week
+  container.querySelectorAll('.week-picker-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const newWeekIndex = parseInt((btn as HTMLElement).dataset.weekIndex!);
+      if (state && template) {
+        const newState: ProgressionState = { ...state, weekIndex: newWeekIndex, dayIndex: 0 };
+        await putState(newState);
+        renderHome(container);
+      }
+    });
+  });
 
   // Day picker — allow selecting a different day within the current week
   container.querySelectorAll('.day-picker-btn').forEach((btn) => {
