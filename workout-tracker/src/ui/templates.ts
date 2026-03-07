@@ -154,9 +154,13 @@ export async function renderTemplateEdit(
         const dayEl = document.createElement('div');
         dayEl.className = 'day-section';
         dayEl.innerHTML = `
-          <h4>
+          <div class="day-header">
             <input type="text" value="${day.name}" class="day-name-input" data-week="${wi}" data-day="${di}">
-          </h4>
+            <div class="day-reorder-btns">
+              <button class="btn btn-small move-day-up-btn" data-week="${wi}" data-day="${di}" ${di === 0 ? 'disabled' : ''}>&uarr;</button>
+              <button class="btn btn-small move-day-down-btn" data-week="${wi}" data-day="${di}" ${di === week.days.length - 1 ? 'disabled' : ''}>&darr;</button>
+            </div>
+          </div>
           <div class="day-exercise">
             <label>Main Lift:</label>
             <select class="main-lift-select" data-week="${wi}" data-day="${di}" data-testid="main-lift-select-${wi}-${di}">
@@ -313,6 +317,34 @@ export async function renderTemplateEdit(
           isAmrap: false,
         });
         renderWeeks();
+      });
+    });
+
+    // Move day up buttons
+    weeksContainer.querySelectorAll('.move-day-up-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const el = e.currentTarget as HTMLButtonElement;
+        const wi = parseInt(el.dataset.week!);
+        const di = parseInt(el.dataset.day!);
+        if (di > 0) {
+          const days = template!.weeks[wi].days;
+          [days[di - 1], days[di]] = [days[di], days[di - 1]];
+          renderWeeks();
+        }
+      });
+    });
+
+    // Move day down buttons
+    weeksContainer.querySelectorAll('.move-day-down-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const el = e.currentTarget as HTMLButtonElement;
+        const wi = parseInt(el.dataset.week!);
+        const di = parseInt(el.dataset.day!);
+        const days = template!.weeks[wi].days;
+        if (di < days.length - 1) {
+          [days[di], days[di + 1]] = [days[di + 1], days[di]];
+          renderWeeks();
+        }
       });
     });
 

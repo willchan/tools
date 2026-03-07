@@ -1,4 +1,5 @@
-import { getState, getAllTemplates, getAllTrainingMaxes } from '../db/database';
+import { getState, getAllTemplates, getAllTrainingMaxes, putState } from '../db/database';
+import type { ProgressionState } from '../db/types';
 import { navigate } from './router';
 
 export async function renderHome(container: HTMLElement): Promise<void> {
@@ -26,11 +27,16 @@ export async function renderHome(container: HTMLElement): Promise<void> {
     const week = template.weeks[state.weekIndex];
     const day = week?.days[state.dayIndex];
 
+    const dayPickerButtons = week?.days.map((d, i) =>
+      `<button class="day-picker-btn ${i === state.dayIndex ? 'active' : ''}" data-day-index="${i}">${d.name}</button>`
+    ).join('') ?? '';
+
     nextSection.innerHTML = `
       <h2>Next Workout</h2>
       <div class="workout-card" data-testid="next-workout-card">
         <p class="template-name">${template.name}</p>
         <p class="cycle-info">Cycle ${state.cycle} · ${week?.name ?? 'Unknown'}</p>
+        <div class="day-picker" data-testid="day-picker">${dayPickerButtons}</div>
         <p class="day-name">${day?.name ?? 'Unknown'}</p>
         <button id="start-workout-btn" class="btn btn-primary btn-large">
           Start Next Workout
@@ -83,6 +89,18 @@ export async function renderHome(container: HTMLElement): Promise<void> {
 
   const setupBtn = document.getElementById('setup-template-btn');
   setupBtn?.addEventListener('click', () => navigate('templates'));
+
+  // Day picker — allow selecting a different day within the current week
+  container.querySelectorAll('.day-picker-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const newDayIndex = parseInt((btn as HTMLElement).dataset.dayIndex!);
+      if (state && template) {
+        const newState: ProgressionState = { ...state, dayIndex: newDayIndex };
+        await putState(newState);
+        renderHome(container);
+      }
+    });
+  });
 
   nav.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
