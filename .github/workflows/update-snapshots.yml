@@ -32,23 +32,12 @@ jobs:
       - name: Update snapshots
         run: bunx playwright test --update-snapshots --grep "visual snapshot"
 
-      - name: Check for snapshot changes
-        id: changes
-        run: |
-          cd ..
-          git add -N .
-          if git diff --quiet -- 'workout-tracker/e2e/**/*-snapshots/**'; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Commit and push updated snapshots
-        if: steps.changes.outputs.changed == 'true'
         run: |
           cd ..
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add 'workout-tracker/e2e/**/*-snapshots/**'
+          git add --all -- '*.png'
+          git diff --cached --quiet && echo "No snapshot changes" && exit 0
           git commit -m "chore: update Playwright visual snapshots [skip ci]"
           git push
