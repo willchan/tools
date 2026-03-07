@@ -102,12 +102,16 @@ test.describe('Workout Flow', () => {
   });
 
   test('shows complete workout button after all sets', async ({ page }) => {
-    // Complete all 14 sets
+    test.setTimeout(60000);
+    // Complete all 14 sets, skipping rest timer between each
     for (let i = 0; i < 14; i++) {
       await page.click('[data-testid="done-set-btn"]');
-      const skipBtn = page.locator('#skip-timer-btn');
-      if (await skipBtn.isVisible()) {
-        await skipBtn.click();
+      // Skip rest timer if it appears (not shown after the last set)
+      try {
+        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+        await page.click('#skip-timer-btn');
+      } catch {
+        // Timer not shown (last set completed)
       }
     }
 
@@ -118,6 +122,46 @@ test.describe('Workout Flow', () => {
   test('back button returns to home', async ({ page }) => {
     await page.click('#back-btn');
     await expect(page.locator('h1')).toHaveText('Workout Tracker');
+  });
+
+  test('done button is disabled while rest timer is active', async ({ page }) => {
+    // Complete first set to start rest timer
+    await page.click('[data-testid="done-set-btn"]');
+
+    // Timer should be visible
+    const timer = page.locator('#rest-timer');
+    await expect(timer).toBeVisible();
+
+    // Done button should be disabled during rest
+    const doneBtn = page.locator('[data-testid="done-set-btn"]');
+    await expect(doneBtn).toBeDisabled();
+  });
+
+  test('done button re-enables after skipping rest timer', async ({ page }) => {
+    // Complete first set to start rest timer
+    await page.click('[data-testid="done-set-btn"]');
+
+    // Skip the timer
+    await page.click('#skip-timer-btn');
+
+    // Done button should be enabled again
+    const doneBtn = page.locator('[data-testid="done-set-btn"]');
+    await expect(doneBtn).toBeEnabled();
+  });
+
+  test('rest timer stays visible when scrolling (sticky)', async ({ page }) => {
+    // Complete first set to start rest timer
+    await page.click('[data-testid="done-set-btn"]');
+
+    const timer = page.locator('#rest-timer');
+    await expect(timer).toBeVisible();
+
+    // Scroll to the bottom of the page
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(100);
+
+    // Timer should still be visible in viewport
+    await expect(timer).toBeInViewport();
   });
 
   test('visual snapshot of workout screen', async ({ page }) => {

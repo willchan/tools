@@ -14,9 +14,10 @@ import { advanceState } from '../logic/progression';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
-import { fireTimerNotification } from './notifications';
+import { requestNotificationPermission, fireTimerNotification } from './notifications';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
+let isResting = false;
 
 export async function renderWorkout(container: HTMLElement): Promise<void> {
   const state = await getState();
@@ -41,8 +42,9 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     return;
   }
 
-  // Request wake lock
+  // Request wake lock and notification permission
   requestWakeLock();
+  requestNotificationPermission();
 
   const completedSets: CompletedSet[] = [];
   let currentSetIndex = 0;
@@ -163,7 +165,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
     // Attach done button handler
     const doneBtn = setsContainer.querySelector('.done-set-btn') as HTMLButtonElement | null;
-    doneBtn?.addEventListener('click', () => markSetDone());
+    if (doneBtn) {
+      doneBtn.disabled = isResting;
+      doneBtn.addEventListener('click', () => markSetDone());
+    }
 
     // Scroll current set into view
     const currentEl = setsContainer.querySelector('.current');
@@ -208,11 +213,18 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     renderSets();
   }
 
+  function setDoneButtonDisabled(disabled: boolean) {
+    isResting = disabled;
+    const doneBtn = setsContainer.querySelector('.done-set-btn') as HTMLButtonElement | null;
+    if (doneBtn) doneBtn.disabled = disabled;
+  }
+
   async function startRestTimer(restSeconds = 90) {
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
 
     timerEl.classList.remove('hidden');
+    setDoneButtonDisabled(true);
 
     if (timerInterval) clearInterval(timerInterval);
 
@@ -234,6 +246,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         timerInterval = null;
         await putTimerState(null);
         timerEl.classList.add('hidden');
+        setDoneButtonDisabled(false);
         fireTimerNotification();
       }
     };
@@ -292,8 +305,9 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   document.getElementById('skip-timer-btn')?.addEventListener('click', async () => {
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = null;
-    await putTimerState(null);
     timerEl.classList.add('hidden');
+    setDoneButtonDisabled(false);
+    await putTimerState(null);
   });
 
   // Check for existing timer (browser tab resumed after suspension)
@@ -302,10 +316,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const remaining = getRemainingMs(existingTimer);
     if (remaining > 0) {
       timerEl.classList.remove('hidden');
+      setDoneButtonDisabled(true);
       timerInterval = setInterval(async () => {
         const saved = await getTimerState();
         if (!saved) {
           timerEl.classList.add('hidden');
+          setDoneButtonDisabled(false);
           return;
         }
         const r = getRemainingMs(saved);
@@ -316,6 +332,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           timerInterval = null;
           await putTimerState(null);
           timerEl.classList.add('hidden');
+          setDoneButtonDisabled(false);
           fireTimerNotification();
         }
       }, 250);
