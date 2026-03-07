@@ -21,6 +21,7 @@ export function getDefaultExercises(): Exercise[] {
     { id: 'pullup', name: 'Pull-ups', category: 'bodyweight', muscleGroup: 'back' },
     { id: 'dip', name: 'Dips', category: 'bodyweight', muscleGroup: 'chest' },
     { id: 'hanging-leg-raise', name: 'Hanging Leg Raise', category: 'bodyweight', muscleGroup: 'core' },
+    { id: 'dragon-flag', name: 'Dragon Flag', category: 'bodyweight', muscleGroup: 'core' },
     // Machine / Cable
     { id: 'leg-curl', name: 'Leg Curl', category: 'machine', muscleGroup: 'legs' },
     { id: 'leg-extension', name: 'Leg Extension', category: 'machine', muscleGroup: 'legs' },
