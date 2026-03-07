@@ -90,6 +90,66 @@ test.describe('Template Editor — Day Reordering', () => {
   });
 });
 
+test.describe('Template Editor — Day Reorder Propagation Across Weeks', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.click('.nav-btn[data-route="templates"]');
+    await page.waitForSelector('.templates-screen');
+    await page.click('.edit-template-btn');
+    await page.waitForSelector('.template-edit-screen');
+  });
+
+  test('reordering a day in week 1 propagates to all other weeks', async ({ page }) => {
+    const weeks = page.locator('.week-section');
+
+    // Get day names for week 1 (index 0) before reorder
+    const week1Day0Before = await weeks.nth(0).locator('.day-name-input').nth(0).inputValue();
+    const week1Day1Before = await weeks.nth(0).locator('.day-name-input').nth(1).inputValue();
+
+    // Verify weeks 2 and 3 start with same day ordering as week 1
+    expect(await weeks.nth(1).locator('.day-name-input').nth(0).inputValue()).toBe(week1Day0Before);
+    expect(await weeks.nth(1).locator('.day-name-input').nth(1).inputValue()).toBe(week1Day1Before);
+    expect(await weeks.nth(2).locator('.day-name-input').nth(0).inputValue()).toBe(week1Day0Before);
+    expect(await weeks.nth(2).locator('.day-name-input').nth(1).inputValue()).toBe(week1Day1Before);
+
+    // Move day 1 down (swapping day 0 and day 1) in week 1
+    await weeks.nth(0).locator('.day-section').nth(0).locator('.move-day-down-btn').click();
+
+    // Week 1 should now be swapped
+    expect(await weeks.nth(0).locator('.day-name-input').nth(0).inputValue()).toBe(week1Day1Before);
+    expect(await weeks.nth(0).locator('.day-name-input').nth(1).inputValue()).toBe(week1Day0Before);
+
+    // Weeks 2 and 3 should also be swapped
+    expect(await weeks.nth(1).locator('.day-name-input').nth(0).inputValue()).toBe(week1Day1Before);
+    expect(await weeks.nth(1).locator('.day-name-input').nth(1).inputValue()).toBe(week1Day0Before);
+    expect(await weeks.nth(2).locator('.day-name-input').nth(0).inputValue()).toBe(week1Day1Before);
+    expect(await weeks.nth(2).locator('.day-name-input').nth(1).inputValue()).toBe(week1Day0Before);
+  });
+
+  test('reordering persists across weeks after save and reload', async ({ page }) => {
+    const weeks = page.locator('.week-section');
+
+    const week2Day1Before = await weeks.nth(1).locator('.day-name-input').nth(1).inputValue();
+
+    // Move first day down in week 1
+    await weeks.nth(0).locator('.day-section').nth(0).locator('.move-day-down-btn').click();
+
+    // Save
+    await page.click('[data-testid="save-template-btn"]');
+    await page.waitForSelector('.templates-screen');
+
+    // Re-open editor
+    await page.click('.edit-template-btn');
+    await page.waitForSelector('.template-edit-screen');
+
+    const weeksAfter = page.locator('.week-section');
+
+    // Week 2 day at position 0 should now be what was previously at position 1
+    expect(await weeksAfter.nth(1).locator('.day-name-input').nth(0).inputValue()).toBe(week2Day1Before);
+  });
+});
+
 test.describe('Home Screen — Day Picker', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
