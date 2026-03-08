@@ -2,12 +2,6 @@ name: Update Playwright Snapshots
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'workout-tracker/src/**'
-      - 'workout-tracker/public/**'
-      - 'workout-tracker/e2e/**'
 
 jobs:
   update-snapshots:
