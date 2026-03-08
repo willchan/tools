@@ -71,6 +71,27 @@ test.describe('Intersperse Accessories', () => {
     // Wait for the setting to be saved to IndexedDB by confirming checkbox state
     await expect(page.locator('[data-testid="intersperse-checkbox"]')).toBeChecked();
 
+    // Wait for the async IndexedDB write triggered by the change event to complete
+    await page.waitForFunction(async () => {
+      const { openDB } = await import('/src/db/database.ts' as any).catch(() => ({ openDB: null }));
+      // Fallback: read directly from IndexedDB
+      return new Promise<boolean>((resolve) => {
+        const req = indexedDB.open('workout-tracker');
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('state', 'readonly');
+          const store = tx.objectStore('state');
+          const getReq = store.get('settings');
+          getReq.onsuccess = () => {
+            const settings = getReq.result;
+            resolve(settings?.intersperseAccessories === true);
+          };
+          getReq.onerror = () => resolve(false);
+        };
+        req.onerror = () => resolve(false);
+      });
+    });
+
     // Reload page
     await page.reload();
     await page.waitForSelector('#app');
