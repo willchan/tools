@@ -1,4 +1,4 @@
-import { getState, getAllTemplates, getAllTrainingMaxes, putState } from '../db/database';
+import { getState, getAllTemplates, getAllTrainingMaxes, putState, getSettings, putSettings } from '../db/database';
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
 
@@ -6,6 +6,7 @@ export async function renderHome(container: HTMLElement): Promise<void> {
   const state = await getState();
   const templates = await getAllTemplates();
   const tms = await getAllTrainingMaxes();
+  const settings = await getSettings();
 
   const template = templates.find((t) => t.id === state?.templateId);
 
@@ -43,6 +44,12 @@ export async function renderHome(container: HTMLElement): Promise<void> {
         <div class="week-picker" data-testid="week-picker">${weekPickerButtons}</div>
         <div class="day-picker" data-testid="day-picker">${dayPickerButtons}</div>
         <p class="day-name">${day?.name ?? 'Unknown'}</p>
+        <label class="intersperse-option" data-testid="intersperse-label">
+          <input type="checkbox" id="intersperse-checkbox"
+                 data-testid="intersperse-checkbox"
+                 ${settings.intersperseAccessories ? 'checked' : ''}>
+          <span>Intersperse accessories between main sets</span>
+        </label>
         <button id="start-workout-btn" class="btn btn-primary btn-large">
           Start Next Workout
         </button>
@@ -89,6 +96,12 @@ export async function renderHome(container: HTMLElement): Promise<void> {
   container.appendChild(nav);
 
   // Event listeners
+  const intersperseCheckbox = document.getElementById('intersperse-checkbox') as HTMLInputElement | null;
+  intersperseCheckbox?.addEventListener('change', async () => {
+    const current = await getSettings();
+    await putSettings({ ...current, intersperseAccessories: intersperseCheckbox.checked });
+  });
+
   const startBtn = document.getElementById('start-workout-btn');
   startBtn?.addEventListener('click', () => navigate('workout'));
 

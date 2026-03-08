@@ -7,6 +7,7 @@ import {
   putTrainingMax,
   putTimerState,
   getTimerState,
+  getSettings,
 } from '../db/database';
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates } from '../logic/calculator';
@@ -34,6 +35,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   const tmsRaw = await getAllTrainingMaxes();
   const tmMap = new Map(tmsRaw.map((tm) => [tm.exerciseId, tm.weight]));
+  const settings = await getSettings();
 
   const week = template.weeks[state.weekIndex];
   const day = week?.days[state.dayIndex];
@@ -41,6 +43,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     container.innerHTML = '<p>Invalid workout day.</p>';
     return;
   }
+
+  // Optionally intersperse accessories between primary sets
+  const workoutSets: TemplateSet[] = settings.intersperseAccessories
+    ? intersperseSets(day.sets)
+    : [...day.sets];
 
   // Request wake lock and notification permission
   requestWakeLock();
@@ -92,7 +99,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   function renderSets() {
     setsContainer.innerHTML = '';
-    day!.sets.forEach((set, idx) => {
+    workoutSets.forEach((set, idx) => {
       const weight = getSetWeight(set, tmMap);
       const plates = weight > 0 ? calculatePlates(weight) : null;
       const isCompleted = idx < currentSetIndex;
@@ -179,7 +186,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     });
 
     // Show complete button when all sets done
-    if (currentSetIndex >= day!.sets.length) {
+    if (currentSetIndex >= workoutSets.length) {
       completeBtn.classList.remove('hidden');
     }
 
@@ -231,7 +238,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   }
 
   async function markSetDone() {
-    const set = day!.sets[currentSetIndex];
+    const set = workoutSets[currentSetIndex];
     const weight = getSetWeight(set, tmMap);
 
     let actualReps = set.reps;
@@ -250,11 +257,34 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       timestamp: Date.now(),
     });
 
+    const justCompletedSet = set;
     currentSetIndex++;
 
-    // Start rest timer if more sets remain
-    if (currentSetIndex < day!.sets.length) {
-      await startRestTimer();
+    // Rest timer logic
+    if (currentSetIndex < workoutSets.length) {
+      if (settings.intersperseAccessories) {
+        const isCompletedPrimary = justCompletedSet.tmPercentage !== null;
+        const nextSet = workoutSets[currentSetIndex];
+        const isNextAccessory = nextSet.tmPercentage === null;
+
+        if (isCompletedPrimary) {
+          // After primary set: start rest timer
+          await startRestTimer();
+          if (isNextAccessory) {
+            // Next is accessory — keep done button enabled so user can do it during rest
+            setDoneButtonDisabled(false);
+          }
+        }
+        // After accessory set: no new timer. If timer still running, disable done button.
+        if (!isCompletedPrimary) {
+          const existingTimer = await getTimerState();
+          if (existingTimer && getRemainingMs(existingTimer) > 0) {
+            setDoneButtonDisabled(true);
+          }
+        }
+      } else {
+        await startRestTimer();
+      }
     }
 
     renderSets();
@@ -266,7 +296,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     if (doneBtn) doneBtn.disabled = disabled;
   }
 
-  async function startRestTimer(restSeconds = 90) {
+  async function startRestTimer(restSeconds = settings.restTimerSeconds) {
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
 
@@ -306,7 +336,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
     const bbbFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
 
-    day!.sets.forEach((set, i) => {
+    workoutSets.forEach((set, i) => {
       const completed = completedSets[i];
       // AMRAP sets can't "fail" — any rep count is valid
       if (!completed || set.isAmrap) return;
@@ -458,4 +488,39 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   }
 
   renderSets();
+}
+
+/**
+ * Intersperse accessory sets between primary (main + BBB) sets.
+ * Primary sets keep their order; accessories are inserted one at a time
+ * after each primary set until all accessories are placed.
+ */
+function intersperseSets(sets: TemplateSet[]): TemplateSet[] {
+  const primary: TemplateSet[] = [];
+  const accessory: TemplateSet[] = [];
+
+  for (const set of sets) {
+    if (set.tmPercentage !== null) {
+      primary.push(set);
+    } else {
+      accessory.push(set);
+    }
+  }
+
+  const result: TemplateSet[] = [];
+  let accIdx = 0;
+
+  for (const p of primary) {
+    result.push(p);
+    if (accIdx < accessory.length) {
+      result.push(accessory[accIdx++]);
+    }
+  }
+
+  // Any remaining accessories go at the end
+  while (accIdx < accessory.length) {
+    result.push(accessory[accIdx++]);
+  }
+
+  return result;
 }

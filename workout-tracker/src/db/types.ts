@@ -79,6 +79,12 @@ export interface TimerState {
   durationMs: number;
 }
 
+/** User-configurable settings. */
+export interface UserSettings {
+  restTimerSeconds: number;
+  intersperseAccessories: boolean;
+}
+
 /** Full export shape for sync. */
 export interface AppData {
   exercises: Exercise[];
@@ -87,4 +93,5 @@ export interface AppData {
   trainingMaxes: TrainingMax[];
   history: WorkoutLog[];
   timerState: TimerState | null;
+  settings?: UserSettings;
 }
