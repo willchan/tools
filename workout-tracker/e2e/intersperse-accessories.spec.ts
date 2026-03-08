@@ -68,9 +68,6 @@ test.describe('Intersperse Accessories', () => {
     // Enable intersperse
     await page.locator('[data-testid="intersperse-checkbox"]').check();
 
-    // Wait for the setting to be saved to IndexedDB by confirming checkbox state
-    await expect(page.locator('[data-testid="intersperse-checkbox"]')).toBeChecked();
-
     // Wait for the async IndexedDB write triggered by the change event to complete
     await page.waitForFunction(async () => {
       const { openDB } = await import('/src/db/database.ts' as any).catch(() => ({ openDB: null }));

@@ -1,4 +1,4 @@
-import { getState, getAllTemplates, getAllTrainingMaxes, putState, getSettings, putSettings } from '../db/database';
+import { getState, getAllTemplates, getAllTrainingMaxes, putState, getSettings, putSettings, getAllHistory } from '../db/database';
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
 
@@ -8,6 +8,7 @@ export async function renderHome(container: HTMLElement): Promise<void> {
   const tms = await getAllTrainingMaxes();
   const settings = await getSettings();
 
+  const history = await getAllHistory();
   const template = templates.find((t) => t.id === state?.templateId);
 
   container.innerHTML = '';
@@ -32,9 +33,20 @@ export async function renderHome(container: HTMLElement): Promise<void> {
       `<button class="week-picker-btn ${i === state.weekIndex ? 'active' : ''}" data-week-index="${i}">${w.name}</button>`
     ).join('');
 
-    const dayPickerButtons = week?.days.map((d, i) =>
-      `<button class="day-picker-btn ${i === state.dayIndex ? 'active' : ''}" data-day-index="${i}">${d.name}</button>`
-    ).join('') ?? '';
+    // Find completed days for the current cycle+week
+    const completedDayIndices = new Set(
+      history
+        .filter((log) => log.templateId === state.templateId && log.cycle === state.cycle && log.weekIndex === state.weekIndex)
+        .map((log) => log.dayIndex)
+    );
+
+    const dayPickerButtons = week?.days.map((d, i) => {
+      const isCompleted = completedDayIndices.has(i);
+      const classes = ['day-picker-btn'];
+      if (i === state.dayIndex) classes.push('active');
+      if (isCompleted) classes.push('completed');
+      return `<button class="${classes.join(' ')}" data-day-index="${i}" ${isCompleted ? 'disabled' : ''}>${d.name}</button>`;
+    }).join('') ?? '';
 
     nextSection.innerHTML = `
       <h2>Next Workout</h2>
