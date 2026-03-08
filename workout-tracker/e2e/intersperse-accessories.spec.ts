@@ -68,8 +68,24 @@ test.describe('Intersperse Accessories', () => {
     // Enable intersperse
     await page.locator('[data-testid="intersperse-checkbox"]').check();
 
-    // Wait for the setting to be saved to IndexedDB by confirming checkbox state
-    await expect(page.locator('[data-testid="intersperse-checkbox"]')).toBeChecked();
+    // Wait for the setting to actually be persisted in IndexedDB
+    await expect(async () => {
+      const persisted = await page.evaluate(() => {
+        return new Promise<boolean>((resolve) => {
+          const req = indexedDB.open('workout-tracker');
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('state', 'readonly');
+            const store = tx.objectStore('state');
+            const get = store.get('settings');
+            get.onsuccess = () => resolve(get.result?.intersperseAccessories === true);
+            get.onerror = () => resolve(false);
+          };
+          req.onerror = () => resolve(false);
+        });
+      });
+      expect(persisted).toBe(true);
+    }).toPass({ timeout: 5000 });
 
     // Reload page
     await page.reload();
