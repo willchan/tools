@@ -910,3 +910,41 @@ body {
     flex-wrap: nowrap;
   }
 }
+
+/* Abandon workout dialog */
+.abandon-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.abandon-dialog-card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  width: 90%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.abandon-dialog-card h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.abandon-dialog-card p {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.abandon-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}

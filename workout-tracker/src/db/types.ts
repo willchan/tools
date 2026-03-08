@@ -85,6 +85,17 @@ export interface UserSettings {
   intersperseAccessories: boolean;
 }
 
+/** In-progress workout state, persisted for reload resilience. */
+export interface ActiveWorkout {
+  templateId: string;
+  cycle: number;
+  weekIndex: number;
+  dayIndex: number;
+  completedSets: CompletedSet[];
+  currentSetIndex: number;
+  startedAt: number;
+}
+
 /** Full export shape for sync. */
 export interface AppData {
   exercises: Exercise[];

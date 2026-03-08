@@ -8,6 +8,7 @@ import type {
   TimerState,
   UserSettings,
   AppData,
+  ActiveWorkout,
 } from './types';
 import { getDefaultExercises, getDefault531Template } from './defaults';
 
@@ -125,6 +126,21 @@ export async function putTimerState(timer: TimerState | null): Promise<void> {
     await db.put('timer', timer, 'current');
   } else {
     await db.delete('timer', 'current');
+  }
+}
+
+// --- Active Workout (in-progress persistence) ---
+export async function getActiveWorkout(): Promise<ActiveWorkout | null> {
+  const db = await getDB();
+  return (await db.get('state', 'activeWorkout')) ?? null;
+}
+
+export async function putActiveWorkout(workout: ActiveWorkout | null): Promise<void> {
+  const db = await getDB();
+  if (workout) {
+    await db.put('state', workout, 'activeWorkout');
+  } else {
+    await db.delete('state', 'activeWorkout');
   }
 }
 
