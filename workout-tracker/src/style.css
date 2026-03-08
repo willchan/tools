@@ -331,9 +331,133 @@ body {
 
 .set-actions {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.done-set-btn {
+  width: 100%;
+}
+
+.missed-reps-toggle {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 4px 0;
+  font-family: var(--font);
+  text-align: center;
+  width: 100%;
+}
+
+.missed-reps-toggle:hover {
+  color: var(--color-text);
+}
+
+/* Reps stepper */
+.reps-stepper {
+  display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 8px;
+  padding: 4px 0;
+}
+
+.stepper-label {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  flex: 1;
+}
+
+.stepper-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 1.4rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font);
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.stepper-btn:active {
+  background: var(--color-primary);
+  color: #fff;
+  transform: scale(0.95);
+}
+
+.stepper-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  min-width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Failure bottom sheet */
+.failure-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.failure-sheet-card {
+  background: var(--color-surface);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 24px 20px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.failure-sheet-card h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.failure-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.failure-list li {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  padding-left: 14px;
+  position: relative;
+}
+
+.failure-list li::before {
+  content: "•";
+  color: var(--color-danger);
+  position: absolute;
+  left: 0;
+}
+
+.failure-advice {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.set-reps-done.missed {
+  color: var(--color-danger);
 }
 
 .set-result {
@@ -345,23 +469,6 @@ body {
   font-weight: 600;
 }
 
-.amrap-input-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
-}
-
-.amrap-input {
-  width: 60px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: 1rem;
-  text-align: center;
-}
 
 /* === Templates Screen === */
 .templates-screen,

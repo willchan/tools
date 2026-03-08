@@ -113,6 +113,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       }
 
       if (isCompleted && completed) {
+        const missedReps = completed.actualReps < completed.prescribedReps;
         setEl.innerHTML = `
           <div class="set-info">
             <span class="set-exercise">${set.exerciseId}</span>
@@ -120,31 +121,50 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
             ${plateDisplay}
           </div>
           <div class="set-result">
-            <span class="set-reps-done">${completed.actualReps} reps ✓</span>
+            <span class="set-reps-done ${missedReps ? 'missed' : ''}">${completed.actualReps} reps ✓</span>
           </div>
         `;
       } else if (isCurrent) {
-        setEl.innerHTML = `
-          <div class="set-info">
-            <span class="set-exercise">${set.exerciseId}</span>
-            <span class="set-weight">${weightDisplay}</span>
-            ${plateDisplay}
-            <span class="set-prescription">${repsDisplay}</span>
-          </div>
-          <div class="set-actions">
-            ${set.isAmrap ? `
-              <label class="amrap-input-label">
-                Reps:
-                <input type="number" id="amrap-input" class="amrap-input"
-                       value="${set.reps}" min="1" inputmode="numeric"
-                       data-testid="amrap-input">
-              </label>
-            ` : ''}
-            <button class="btn btn-primary done-set-btn" data-testid="done-set-btn">
-              Done
-            </button>
-          </div>
-        `;
+        if (set.isAmrap) {
+          // AMRAP: stepper always visible, no toggle needed, no upper cap
+          setEl.innerHTML = `
+            <div class="set-info">
+              <span class="set-exercise">${set.exerciseId}</span>
+              <span class="set-weight">${weightDisplay}</span>
+              ${plateDisplay}
+              <span class="set-prescription">${repsDisplay}</span>
+            </div>
+            <div class="set-actions">
+              <div class="reps-stepper" data-testid="reps-stepper" data-max="999">
+                <span class="stepper-label">Reps:</span>
+                <button class="stepper-btn" data-testid="stepper-dec" aria-label="Fewer reps">−</button>
+                <span class="stepper-value" data-testid="stepper-value">${set.reps}</span>
+                <button class="stepper-btn" data-testid="stepper-inc" aria-label="More reps">+</button>
+              </div>
+              <button class="btn btn-primary done-set-btn" data-testid="done-set-btn">Done</button>
+            </div>
+          `;
+        } else {
+          // Non-AMRAP: Done button primary, "missed some reps?" toggle reveals stepper
+          setEl.innerHTML = `
+            <div class="set-info">
+              <span class="set-exercise">${set.exerciseId}</span>
+              <span class="set-weight">${weightDisplay}</span>
+              ${plateDisplay}
+              <span class="set-prescription">${repsDisplay}</span>
+            </div>
+            <div class="set-actions">
+              <div class="reps-stepper hidden" data-testid="reps-stepper" data-max="${set.reps}">
+                <span class="stepper-label">Reps:</span>
+                <button class="stepper-btn" data-testid="stepper-dec" aria-label="Fewer reps">−</button>
+                <span class="stepper-value" data-testid="stepper-value">${set.reps}</span>
+                <button class="stepper-btn" data-testid="stepper-inc" aria-label="More reps">+</button>
+              </div>
+              <button class="btn btn-primary done-set-btn" data-testid="done-set-btn">Done</button>
+              <button class="missed-reps-toggle" data-testid="missed-reps-toggle">missed some reps?</button>
+            </div>
+          `;
+        }
       } else {
         setEl.innerHTML = `
           <div class="set-info">
@@ -163,16 +183,44 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       completeBtn.classList.remove('hidden');
     }
 
-    // Attach done button handler
+    attachSetHandlers();
+    // Reflect rest state on the newly rendered done button
     const doneBtn = setsContainer.querySelector('.done-set-btn') as HTMLButtonElement | null;
-    if (doneBtn) {
-      doneBtn.disabled = isResting;
-      doneBtn.addEventListener('click', () => markSetDone());
-    }
+    if (doneBtn) doneBtn.disabled = isResting;
 
     // Scroll current set into view
     const currentEl = setsContainer.querySelector('.current');
     currentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function attachSetHandlers() {
+    const doneBtn = setsContainer.querySelector('.done-set-btn') as HTMLButtonElement | null;
+    doneBtn?.addEventListener('click', () => markSetDone());
+
+    const toggleBtn = setsContainer.querySelector('[data-testid="missed-reps-toggle"]') as HTMLButtonElement | null;
+    toggleBtn?.addEventListener('click', () => {
+      const stepper = setsContainer.querySelector('[data-testid="reps-stepper"]') as HTMLElement | null;
+      stepper?.classList.remove('hidden');
+      toggleBtn.classList.add('hidden');
+    });
+
+    const decBtn = setsContainer.querySelector('[data-testid="stepper-dec"]') as HTMLButtonElement | null;
+    decBtn?.addEventListener('click', () => {
+      const valueEl = setsContainer.querySelector('[data-testid="stepper-value"]') as HTMLElement | null;
+      if (!valueEl) return;
+      const current = parseInt(valueEl.textContent || '0', 10);
+      if (current > 0) valueEl.textContent = String(current - 1);
+    });
+
+    const incBtn = setsContainer.querySelector('[data-testid="stepper-inc"]') as HTMLButtonElement | null;
+    incBtn?.addEventListener('click', () => {
+      const stepperEl = setsContainer.querySelector('[data-testid="reps-stepper"]') as HTMLElement | null;
+      const valueEl = setsContainer.querySelector('[data-testid="stepper-value"]') as HTMLElement | null;
+      if (!stepperEl || !valueEl) return;
+      const max = parseInt(stepperEl.dataset.max || '999', 10);
+      const current = parseInt(valueEl.textContent || '0', 10);
+      if (current < max) valueEl.textContent = String(current + 1);
+    });
   }
 
   function getSetWeight(set: TemplateSet, tmMap: Map<string, number>): number {
@@ -187,11 +235,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const weight = getSetWeight(set, tmMap);
 
     let actualReps = set.reps;
-    if (set.isAmrap) {
-      const input = document.getElementById('amrap-input') as HTMLInputElement | null;
-      if (input) {
-        actualReps = parseInt(input.value, 10) || set.reps;
-      }
+    const stepperValue = setsContainer.querySelector('[data-testid="stepper-value"]') as HTMLElement | null;
+    if (stepperValue) {
+      actualReps = parseInt(stepperValue.textContent || '', 10);
+      if (isNaN(actualReps)) actualReps = set.reps;
     }
 
     completedSets.push({
@@ -255,6 +302,70 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     updateTimer();
   }
 
+  function detectFailures() {
+    const mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
+    const bbbFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
+
+    day!.sets.forEach((set, i) => {
+      const completed = completedSets[i];
+      // AMRAP sets can't "fail" — any rep count is valid
+      if (!completed || set.isAmrap) return;
+      if (completed.actualReps >= set.reps) return;
+      if (set.tmPercentage === null) return;
+
+      if (set.tmPercentage > 0.5) {
+        mainFailed.push({ exerciseId: set.exerciseId, got: completed.actualReps, prescribed: set.reps });
+      } else {
+        bbbFailed.push({ exerciseId: set.exerciseId, got: completed.actualReps, prescribed: set.reps });
+      }
+    });
+
+    return { mainFailed, bbbFailed };
+  }
+
+  function showFailureSheet(
+    mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }>,
+    bbbFailed: Array<{ exerciseId: string; got: number; prescribed: number }>,
+  ) {
+    const hasMainFailure = mainFailed.length > 0;
+
+    const items = [
+      ...mainFailed.map(
+        (f) => `<li>${f.exerciseId}: ${f.got}/${f.prescribed} reps (main set)</li>`,
+      ),
+      ...bbbFailed.map(
+        (f) => `<li>${f.exerciseId}: ${f.got}/${f.prescribed} reps (5×10)</li>`,
+      ),
+    ].join('');
+
+    const advice = hasMainFailure
+      ? 'Wendler recommends resetting your Training Max when you miss reps on main sets.'
+      : 'Consider dropping your BBB percentage next session (e.g. 50% → 40%).';
+
+    const sheet = document.createElement('div');
+    sheet.className = 'failure-sheet';
+    sheet.id = 'failure-sheet';
+    sheet.innerHTML = `
+      <div class="failure-sheet-card">
+        <h2>Missed reps</h2>
+        <ul class="failure-list">${items}</ul>
+        <p class="failure-advice">${advice}</p>
+        ${hasMainFailure ? `<button id="failure-review-btn" class="btn btn-primary btn-large">Review Training Maxes →</button>` : ''}
+        <button id="failure-skip-btn" class="btn btn-text">Skip for now</button>
+      </div>
+    `;
+
+    document.getElementById('app')?.appendChild(sheet);
+
+    document.getElementById('failure-skip-btn')?.addEventListener('click', () => {
+      navigate('home');
+    });
+
+    document.getElementById('failure-review-btn')?.addEventListener('click', () => {
+      navigate('settings');
+    });
+  }
+
   async function completeWorkout() {
     const log: WorkoutLog = {
       id: `workout-${Date.now()}`,
@@ -290,7 +401,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     if (timerInterval) clearInterval(timerInterval);
     await putTimerState(null);
 
-    navigate('home');
+    const { mainFailed, bbbFailed } = detectFailures();
+    if (mainFailed.length > 0 || bbbFailed.length > 0) {
+      showFailureSheet(mainFailed, bbbFailed);
+    } else {
+      navigate('home');
+    }
   }
 
   // Event listeners
