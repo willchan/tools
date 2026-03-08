@@ -114,8 +114,12 @@ test.describe('Edit Workout History', () => {
     await page.waitForSelector('.workout-screen');
     for (let i = 0; i < 14; i++) {
       await page.click('[data-testid="done-set-btn"]');
-      const skipBtn = page.locator('#skip-timer-btn');
-      if (await skipBtn.isVisible()) await skipBtn.click();
+      try {
+        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+        await page.click('#skip-timer-btn');
+      } catch {
+        // Timer not shown (last set)
+      }
     }
     await page.click('#complete-workout-btn');
     await page.waitForSelector('.home-screen');
