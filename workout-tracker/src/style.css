@@ -266,15 +266,18 @@ body {
 .rest-timer {
   background: var(--color-accent);
   color: #fff;
-  border-radius: var(--radius);
-  padding: 16px;
+  padding: 20px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
-  position: sticky;
-  top: 60px;
-  z-index: 9;
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 600px;
+  z-index: 15;
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .rest-timer.hidden {
@@ -282,13 +285,14 @@ body {
 }
 
 .timer-label {
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .timer-value {
-  font-size: 1.8rem;
+  font-size: 3rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   flex: 1;
