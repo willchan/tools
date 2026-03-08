@@ -4,6 +4,17 @@ import { test, expect } from '@playwright/test';
  * TDD Loop 2: History screen E2E tests.
  */
 
+/** Complete all sets in a workout, skipping the rest timer between sets. */
+async function completeAllSets(page: import('@playwright/test').Page, totalSets = 14) {
+  for (let i = 0; i < totalSets; i++) {
+    await page.click('[data-testid="done-set-btn"]');
+    // Rest timer appears after every set except the last
+    if (i < totalSets - 1) {
+      await page.click('#skip-timer-btn');
+    }
+  }
+}
+
 test.describe('Workout History', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -24,15 +35,7 @@ test.describe('Workout History', () => {
     await page.click('#start-workout-btn');
     await page.waitForSelector('.workout-screen');
 
-    for (let i = 0; i < 14; i++) {
-      await page.click('[data-testid="done-set-btn"]');
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch {
-        // Timer not shown (last set)
-      }
-    }
+    await completeAllSets(page);
 
     await page.click('#complete-workout-btn');
     await page.waitForSelector('.home-screen');
@@ -54,15 +57,7 @@ test.describe('Workout History', () => {
     await page.click('#start-workout-btn');
     await page.waitForSelector('.workout-screen');
 
-    for (let i = 0; i < 14; i++) {
-      await page.click('[data-testid="done-set-btn"]');
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch {
-        // Timer not shown (last set)
-      }
-    }
+    await completeAllSets(page);
 
     await page.click('#complete-workout-btn');
     await page.waitForSelector('.home-screen');

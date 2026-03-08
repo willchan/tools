@@ -4,6 +4,17 @@ import { test, expect } from '@playwright/test';
  * E2E tests for flexible program start and manual correction features.
  */
 
+/** Complete all sets in a workout, skipping the rest timer between sets. */
+async function completeAllSets(page: import('@playwright/test').Page, totalSets = 14) {
+  for (let i = 0; i < totalSets; i++) {
+    await page.click('[data-testid="done-set-btn"]');
+    // Rest timer appears after every set except the last
+    if (i < totalSets - 1) {
+      await page.click('#skip-timer-btn');
+    }
+  }
+}
+
 test.describe('Flexible Program Start', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -26,8 +37,8 @@ test.describe('Flexible Program Start', () => {
   test('clicking a different week updates the current week', async ({ page }) => {
     // Click week 2
     await page.click('.week-picker-btn:nth-child(2)');
-    await page.waitForTimeout(300);
 
+    // Wait for the active class to move to Week 2
     const activeWeek = page.locator('.week-picker-btn.active');
     await expect(activeWeek).toContainText('Week 2');
 
@@ -39,7 +50,9 @@ test.describe('Flexible Program Start', () => {
   test('week selection persists after navigation', async ({ page }) => {
     // Click week 3
     await page.click('.week-picker-btn:nth-child(3)');
-    await page.waitForTimeout(300);
+
+    // Wait for the active class to settle
+    await expect(page.locator('.week-picker-btn.active')).toContainText('Week 3');
 
     // Navigate to settings and back
     await page.click('.nav-btn[data-route="settings"]');
@@ -58,7 +71,7 @@ test.describe('Flexible Program Start', () => {
 
     // Switch to week 2 - should still have 4 days
     await page.click('.week-picker-btn:nth-child(2)');
-    await page.waitForTimeout(300);
+    await expect(page.locator('.week-picker-btn.active')).toContainText('Week 2');
     await expect(dayPicker.locator('.day-picker-btn')).toHaveCount(4);
   });
 });
@@ -112,15 +125,7 @@ test.describe('Edit Workout History', () => {
   async function completeWorkout(page: import('@playwright/test').Page) {
     await page.click('#start-workout-btn');
     await page.waitForSelector('.workout-screen');
-    for (let i = 0; i < 14; i++) {
-      await page.click('[data-testid="done-set-btn"]');
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch {
-        // Timer not shown (last set)
-      }
-    }
+    await completeAllSets(page);
     await page.click('#complete-workout-btn');
     await page.waitForSelector('.home-screen');
   }

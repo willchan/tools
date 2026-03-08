@@ -74,7 +74,8 @@ test.describe('Template Management', () => {
   });
 
   test('visual snapshot of templates screen', async ({ page }) => {
-    await page.waitForTimeout(300);
+    // Wait for template list to be fully rendered
+    await expect(page.locator('[data-testid="template-list"]')).toBeVisible();
     await expect(page).toHaveScreenshot('templates-screen.png', {
       maxDiffPixelRatio: 0.05,
     });

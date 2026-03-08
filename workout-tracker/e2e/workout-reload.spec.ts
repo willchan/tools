@@ -4,6 +4,17 @@ import { test, expect } from '@playwright/test';
  * TDD: Workout reload persistence & cancel/abandon workout.
  */
 
+/** Complete all sets in a workout, skipping the rest timer between sets. */
+async function completeAllSets(page: import('@playwright/test').Page, totalSets = 14) {
+  for (let i = 0; i < totalSets; i++) {
+    await page.click('[data-testid="done-set-btn"]');
+    // Rest timer appears after every set except the last
+    if (i < totalSets - 1) {
+      await page.click('#skip-timer-btn');
+    }
+  }
+}
+
 test.describe('Workout Reload Persistence', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -45,19 +56,19 @@ test.describe('Workout Reload Persistence', () => {
     await page.reload();
     await page.waitForSelector('.workout-screen');
 
-    // Skip any restored timer first
-    try {
-      await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-      await page.click('#skip-timer-btn');
-    } catch { /* no timer */ }
+    // If a rest timer was restored from the reload, skip it
+    const skipBtn = page.locator('#skip-timer-btn');
+    if (await skipBtn.isVisible().catch(() => false)) {
+      await skipBtn.click();
+    }
 
-    // Complete remaining sets and finish the workout
+    // Complete remaining 13 sets and finish the workout
     for (let i = 1; i < 14; i++) {
       await page.click('[data-testid="done-set-btn"]');
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+      // Skip timer between sets (not after the last)
+      if (i < 13) {
         await page.click('#skip-timer-btn');
-      } catch { /* last set */ }
+      }
     }
 
     await page.click('#complete-workout-btn');
@@ -67,15 +78,8 @@ test.describe('Workout Reload Persistence', () => {
   });
 
   test('active workout state is cleared after completing workout', async ({ page }) => {
-    test.setTimeout(60000);
     // Complete all 14 sets
-    for (let i = 0; i < 14; i++) {
-      await page.click('[data-testid="done-set-btn"]');
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch { /* last set */ }
-    }
+    await completeAllSets(page);
     await page.click('#complete-workout-btn');
     await expect(page.locator('h1')).toHaveText('Workout Tracker');
 

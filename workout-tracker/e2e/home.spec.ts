@@ -62,7 +62,9 @@ test.describe('Home Screen', () => {
   });
 
   test('visual snapshot of home screen', async ({ page }) => {
-    await page.waitForTimeout(500); // Wait for data to load
+    // Wait for data-driven content to render
+    await expect(page.locator('[data-testid="next-workout-card"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tm-grid"]')).toBeVisible();
     await expect(page).toHaveScreenshot('home-screen.png', {
       maxDiffPixelRatio: 0.05,
     });
