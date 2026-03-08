@@ -78,4 +78,59 @@ test.describe('Intersperse Accessories', () => {
     // Checkbox should still be checked
     await expect(page.locator('[data-testid="intersperse-checkbox"]')).toBeChecked();
   });
+
+  test('interspersed: done button stays enabled for accessory set after primary', async ({ page }) => {
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Complete first primary set — rest timer should start
+    await page.click('[data-testid="done-set-btn"]');
+    await page.waitForSelector('#rest-timer:not(.hidden)');
+
+    // Now on an accessory set — done button should be ENABLED despite timer running
+    const doneBtn = page.locator('[data-testid="done-set-btn"]');
+    await expect(doneBtn).toBeEnabled();
+  });
+
+  test('interspersed: done button disables after accessory if timer still running', async ({ page }) => {
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Complete primary set (timer starts)
+    await page.click('[data-testid="done-set-btn"]');
+    await page.waitForSelector('#rest-timer:not(.hidden)');
+
+    // Complete accessory set while timer still running
+    await page.click('[data-testid="done-set-btn"]');
+
+    // Now on next primary set — done button should be DISABLED (timer still going)
+    const doneBtn = page.locator('[data-testid="done-set-btn"]');
+    await expect(doneBtn).toBeDisabled();
+  });
+
+  test('interspersed: no new rest timer after completing accessory set', async ({ page }) => {
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Complete primary set (timer starts — default 90s = "1:30")
+    await page.click('[data-testid="done-set-btn"]');
+    await page.waitForSelector('#rest-timer:not(.hidden)');
+
+    // Wait for timer to tick down past the initial value
+    await page.waitForTimeout(1200);
+
+    // Complete accessory set — timer should NOT reset
+    await page.click('[data-testid="done-set-btn"]');
+
+    // Timer should still be visible (continuing from previous rest)
+    await expect(page.locator('#rest-timer')).not.toHaveClass(/hidden/);
+
+    // Timer should NOT have reset to full duration (1:30).
+    // It should show something less than the full duration.
+    const timerValue = await page.locator('#timer-value').textContent();
+    expect(timerValue).not.toBe('1:30');
+  });
 });

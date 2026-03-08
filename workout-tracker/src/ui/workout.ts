@@ -257,11 +257,34 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       timestamp: Date.now(),
     });
 
+    const justCompletedSet = set;
     currentSetIndex++;
 
-    // Start rest timer if more sets remain
+    // Rest timer logic
     if (currentSetIndex < workoutSets.length) {
-      await startRestTimer();
+      if (settings.intersperseAccessories) {
+        const isCompletedPrimary = justCompletedSet.tmPercentage !== null;
+        const nextSet = workoutSets[currentSetIndex];
+        const isNextAccessory = nextSet.tmPercentage === null;
+
+        if (isCompletedPrimary) {
+          // After primary set: start rest timer
+          await startRestTimer();
+          if (isNextAccessory) {
+            // Next is accessory — keep done button enabled so user can do it during rest
+            setDoneButtonDisabled(false);
+          }
+        }
+        // After accessory set: no new timer. If timer still running, disable done button.
+        if (!isCompletedPrimary) {
+          const existingTimer = await getTimerState();
+          if (existingTimer && getRemainingMs(existingTimer) > 0) {
+            setDoneButtonDisabled(true);
+          }
+        }
+      } else {
+        await startRestTimer();
+      }
     }
 
     renderSets();
