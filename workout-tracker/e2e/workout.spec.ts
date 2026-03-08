@@ -73,33 +73,101 @@ test.describe('Workout Flow', () => {
     await expect(timer).toBeHidden();
   });
 
-  test('AMRAP set shows reps input on the third main set', async ({ page }) => {
+  // --- Reps stepper ---
+
+  test('non-AMRAP current set shows missed-reps toggle but not stepper', async ({ page }) => {
+    const toggle = page.locator('[data-testid="missed-reps-toggle"]');
+    const stepper = page.locator('[data-testid="reps-stepper"]');
+    await expect(toggle).toBeVisible();
+    await expect(stepper).toBeHidden();
+  });
+
+  test('clicking missed-reps toggle reveals the stepper', async ({ page }) => {
+    await page.click('[data-testid="missed-reps-toggle"]');
+    const stepper = page.locator('[data-testid="reps-stepper"]');
+    await expect(stepper).toBeVisible();
+  });
+
+  test('stepper defaults to prescribed reps', async ({ page }) => {
+    await page.click('[data-testid="missed-reps-toggle"]');
+    // Week 1 first set: 5 prescribed reps
+    await expect(page.locator('[data-testid="stepper-value"]')).toHaveText('5');
+  });
+
+  test('stepper minus decrements the rep count', async ({ page }) => {
+    await page.click('[data-testid="missed-reps-toggle"]');
+    await page.click('[data-testid="stepper-dec"]');
+    await expect(page.locator('[data-testid="stepper-value"]')).toHaveText('4');
+  });
+
+  test('stepper minus does not go below 0', async ({ page }) => {
+    await page.click('[data-testid="missed-reps-toggle"]');
+    for (let i = 0; i < 10; i++) {
+      await page.click('[data-testid="stepper-dec"]');
+    }
+    await expect(page.locator('[data-testid="stepper-value"]')).toHaveText('0');
+  });
+
+  test('stepper plus does not exceed prescribed reps on non-AMRAP set', async ({ page }) => {
+    await page.click('[data-testid="missed-reps-toggle"]');
+    // Already at prescribed (5); clicking + should stay at 5
+    await page.click('[data-testid="stepper-inc"]');
+    await expect(page.locator('[data-testid="stepper-value"]')).toHaveText('5');
+  });
+
+  test('completing a set with fewer reps records the reduced count', async ({ page }) => {
+    await page.click('[data-testid="missed-reps-toggle"]');
+    await page.click('[data-testid="stepper-dec"]'); // 5 → 4
+    await page.click('[data-testid="done-set-btn"]');
+
+    const firstCompleted = page.locator('.set-item.completed').first();
+    await expect(firstCompleted.locator('.set-reps-done')).toContainText('4');
+  });
+
+  // --- AMRAP stepper ---
+
+  test('AMRAP set shows reps stepper (always visible, no toggle)', async ({ page }) => {
     // Complete first two sets to reach the AMRAP set
     await page.click('[data-testid="done-set-btn"]');
     await page.click('#skip-timer-btn');
     await page.click('[data-testid="done-set-btn"]');
     await page.click('#skip-timer-btn');
 
-    // Third set should be AMRAP
-    const amrapInput = page.locator('[data-testid="amrap-input"]');
-    await expect(amrapInput).toBeVisible();
+    // Third set is AMRAP — stepper visible, no missed-reps toggle
+    await expect(page.locator('[data-testid="reps-stepper"]')).toBeVisible();
+    await expect(page.locator('[data-testid="missed-reps-toggle"]')).not.toBeVisible();
   });
 
-  test('can input custom reps for AMRAP set', async ({ page }) => {
+  test('AMRAP stepper can exceed prescribed reps', async ({ page }) => {
+    await page.click('[data-testid="done-set-btn"]');
+    await page.click('#skip-timer-btn');
+    await page.click('[data-testid="done-set-btn"]');
+    await page.click('#skip-timer-btn');
+
+    // Week 1 AMRAP set: 5 prescribed reps. Click + to go to 6.
+    await page.click('[data-testid="stepper-inc"]');
+    await expect(page.locator('[data-testid="stepper-value"]')).toHaveText('6');
+  });
+
+  test('can log custom reps for AMRAP set using stepper', async ({ page }) => {
     // Navigate to AMRAP set (3rd set)
     await page.click('[data-testid="done-set-btn"]');
     await page.click('#skip-timer-btn');
     await page.click('[data-testid="done-set-btn"]');
     await page.click('#skip-timer-btn');
 
-    const amrapInput = page.locator('[data-testid="amrap-input"]');
-    await amrapInput.fill('8');
+    // Click + three times: 5 → 6 → 7 → 8
+    await page.click('[data-testid="stepper-inc"]');
+    await page.click('[data-testid="stepper-inc"]');
+    await page.click('[data-testid="stepper-inc"]');
     await page.click('[data-testid="done-set-btn"]');
 
-    // Set should be completed with 8 reps shown
     const completedSets = page.locator('.set-item.completed');
     await expect(completedSets).toHaveCount(3);
+    await expect(completedSets.nth(2).locator('.set-reps-done')).toContainText('8');
   });
+
+  // --- Complete workout button ---
 
   test('shows complete workout button after all sets', async ({ page }) => {
     test.setTimeout(60000);
@@ -117,6 +185,81 @@ test.describe('Workout Flow', () => {
 
     const completeBtn = page.locator('#complete-workout-btn');
     await expect(completeBtn).toBeVisible();
+  });
+
+  // --- Failure sheet ---
+
+  test('completing workout without missed reps navigates home directly', async ({ page }) => {
+    test.setTimeout(60000);
+    for (let i = 0; i < 14; i++) {
+      await page.click('[data-testid="done-set-btn"]');
+      try {
+        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+        await page.click('#skip-timer-btn');
+      } catch { /* last set */ }
+    }
+    await page.click('#complete-workout-btn');
+    // Should go straight home, no failure sheet
+    await expect(page.locator('#failure-sheet')).not.toBeAttached();
+    await expect(page.locator('h1')).toHaveText('Workout Tracker');
+  });
+
+  test('completing workout with missed main set reps shows failure sheet', async ({ page }) => {
+    test.setTimeout(60000);
+    // Miss reps on first set (main set, non-AMRAP)
+    await page.click('[data-testid="missed-reps-toggle"]');
+    await page.click('[data-testid="stepper-dec"]'); // 5 → 4
+    await page.click('[data-testid="done-set-btn"]');
+
+    // Complete remaining 13 sets normally
+    for (let i = 1; i < 14; i++) {
+      try {
+        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+        await page.click('#skip-timer-btn');
+      } catch { /* no timer */ }
+      await page.click('[data-testid="done-set-btn"]');
+    }
+
+    await page.click('#complete-workout-btn');
+    await expect(page.locator('#failure-sheet')).toBeVisible();
+  });
+
+  test('failure sheet skip navigates home', async ({ page }) => {
+    test.setTimeout(60000);
+    await page.click('[data-testid="missed-reps-toggle"]');
+    await page.click('[data-testid="stepper-dec"]');
+    await page.click('[data-testid="done-set-btn"]');
+    for (let i = 1; i < 14; i++) {
+      try {
+        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+        await page.click('#skip-timer-btn');
+      } catch { /* no timer */ }
+      await page.click('[data-testid="done-set-btn"]');
+    }
+    await page.click('#complete-workout-btn');
+    await expect(page.locator('#failure-sheet')).toBeVisible();
+
+    await page.click('#failure-skip-btn');
+    await expect(page.locator('h1')).toHaveText('Workout Tracker');
+  });
+
+  test('failure sheet review TMs navigates to settings', async ({ page }) => {
+    test.setTimeout(60000);
+    await page.click('[data-testid="missed-reps-toggle"]');
+    await page.click('[data-testid="stepper-dec"]');
+    await page.click('[data-testid="done-set-btn"]');
+    for (let i = 1; i < 14; i++) {
+      try {
+        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
+        await page.click('#skip-timer-btn');
+      } catch { /* no timer */ }
+      await page.click('[data-testid="done-set-btn"]');
+    }
+    await page.click('#complete-workout-btn');
+    await expect(page.locator('#failure-sheet')).toBeVisible();
+
+    await page.click('#failure-review-btn');
+    await expect(page.locator('h1')).toHaveText('Settings');
   });
 
   test('back button returns to home', async ({ page }) => {
