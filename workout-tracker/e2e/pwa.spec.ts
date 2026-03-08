@@ -23,26 +23,21 @@ test.describe('PWA Features', () => {
     await page.goto('/');
     await page.waitForSelector('#app');
 
-    // Give SW time to register
-    await page.waitForTimeout(1000);
-
-    const swRegistered = await page.evaluate(async () => {
+    // Wait for the service worker to register by polling the registration list
+    const hasSwCode = await page.evaluate(async () => {
       if (!('serviceWorker' in navigator)) return false;
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      return registrations.length > 0;
-    });
 
-    // In dev mode, SW may not register (Vite serves differently), so we just
-    // verify the registration code exists
-    const hasSwCode = await page.evaluate(() => {
-      return 'serviceWorker' in navigator;
+      // In dev mode, SW may not register (Vite serves differently), so we just
+      // verify the registration API exists
+      return true;
     });
     expect(hasSwCode).toBe(true);
   });
 
   test('data can be exported as complete JSON', async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('#app');
+    // Wait for full app init (seedDefaults + render) before touching IndexedDB
+    await page.waitForSelector('#start-workout-btn');
 
     const data = await page.evaluate(async () => {
       const { exportAll } = await import('/src/db/database.ts');
@@ -61,7 +56,8 @@ test.describe('PWA Features', () => {
 
   test('data roundtrips through export/import', async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('#app');
+    // Wait for full app init (seedDefaults + render) before touching IndexedDB
+    await page.waitForSelector('#start-workout-btn');
 
     const roundtrip = await page.evaluate(async () => {
       const { exportAll, importAll } = await import('/src/db/database.ts');

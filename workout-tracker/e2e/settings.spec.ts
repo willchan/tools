@@ -68,7 +68,8 @@ test.describe('Settings', () => {
   });
 
   test('visual snapshot of settings screen', async ({ page }) => {
-    await page.waitForTimeout(300);
+    // Wait for settings form to be fully rendered
+    await expect(page.locator('[data-testid="tm-form"]')).toBeVisible();
     await expect(page).toHaveScreenshot('settings-screen.png', {
       maxDiffPixelRatio: 0.05,
     });

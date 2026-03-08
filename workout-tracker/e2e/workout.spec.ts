@@ -4,6 +4,29 @@ import { test, expect } from '@playwright/test';
  * TDD Loop 2: Workout flow E2E tests.
  */
 
+/** Complete all sets in a workout, skipping the rest timer between sets. */
+async function completeAllSets(page: import('@playwright/test').Page, totalSets = 14) {
+  for (let i = 0; i < totalSets; i++) {
+    await page.click('[data-testid="done-set-btn"]');
+    // Rest timer appears after every set except the last
+    if (i < totalSets - 1) {
+      await page.click('#skip-timer-btn');
+    }
+  }
+}
+
+/**
+ * Complete remaining sets after the first set has already been done
+ * (used in tests that miss reps on set 1 before completing the rest).
+ */
+async function completeRemainingSets(page: import('@playwright/test').Page, fromIndex: number, totalSets = 14) {
+  for (let i = fromIndex; i < totalSets; i++) {
+    // Skip the rest timer left over from the previous set
+    await page.click('#skip-timer-btn');
+    await page.click('[data-testid="done-set-btn"]');
+  }
+}
+
 test.describe('Workout Flow', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -170,18 +193,7 @@ test.describe('Workout Flow', () => {
   // --- Complete workout button ---
 
   test('shows complete workout button after all sets', async ({ page }) => {
-    test.setTimeout(60000);
-    // Complete all 14 sets, skipping rest timer between each
-    for (let i = 0; i < 14; i++) {
-      await page.click('[data-testid="done-set-btn"]');
-      // Skip rest timer if it appears (not shown after the last set)
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch {
-        // Timer not shown (last set completed)
-      }
-    }
+    await completeAllSets(page);
 
     const completeBtn = page.locator('#complete-workout-btn');
     await expect(completeBtn).toBeVisible();
@@ -190,14 +202,7 @@ test.describe('Workout Flow', () => {
   // --- Failure sheet ---
 
   test('completing workout without missed reps navigates home directly', async ({ page }) => {
-    test.setTimeout(60000);
-    for (let i = 0; i < 14; i++) {
-      await page.click('[data-testid="done-set-btn"]');
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch { /* last set */ }
-    }
+    await completeAllSets(page);
     await page.click('#complete-workout-btn');
     // Should go straight home, no failure sheet
     await expect(page.locator('#failure-sheet')).not.toBeAttached();
@@ -205,37 +210,23 @@ test.describe('Workout Flow', () => {
   });
 
   test('completing workout with missed main set reps shows failure sheet', async ({ page }) => {
-    test.setTimeout(60000);
     // Miss reps on first set (main set, non-AMRAP)
     await page.click('[data-testid="missed-reps-toggle"]');
     await page.click('[data-testid="stepper-dec"]'); // 5 → 4
     await page.click('[data-testid="done-set-btn"]');
 
     // Complete remaining 13 sets normally
-    for (let i = 1; i < 14; i++) {
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch { /* no timer */ }
-      await page.click('[data-testid="done-set-btn"]');
-    }
+    await completeRemainingSets(page, 1);
 
     await page.click('#complete-workout-btn');
     await expect(page.locator('#failure-sheet')).toBeVisible();
   });
 
   test('failure sheet skip navigates home', async ({ page }) => {
-    test.setTimeout(60000);
     await page.click('[data-testid="missed-reps-toggle"]');
     await page.click('[data-testid="stepper-dec"]');
     await page.click('[data-testid="done-set-btn"]');
-    for (let i = 1; i < 14; i++) {
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch { /* no timer */ }
-      await page.click('[data-testid="done-set-btn"]');
-    }
+    await completeRemainingSets(page, 1);
     await page.click('#complete-workout-btn');
     await expect(page.locator('#failure-sheet')).toBeVisible();
 
@@ -244,17 +235,10 @@ test.describe('Workout Flow', () => {
   });
 
   test('failure sheet review TMs navigates to settings', async ({ page }) => {
-    test.setTimeout(60000);
     await page.click('[data-testid="missed-reps-toggle"]');
     await page.click('[data-testid="stepper-dec"]');
     await page.click('[data-testid="done-set-btn"]');
-    for (let i = 1; i < 14; i++) {
-      try {
-        await page.locator('#skip-timer-btn').waitFor({ state: 'visible', timeout: 1000 });
-        await page.click('#skip-timer-btn');
-      } catch { /* no timer */ }
-      await page.click('[data-testid="done-set-btn"]');
-    }
+    await completeRemainingSets(page, 1);
     await page.click('#complete-workout-btn');
     await expect(page.locator('#failure-sheet')).toBeVisible();
 
@@ -299,16 +283,14 @@ test.describe('Workout Flow', () => {
     const timer = page.locator('#rest-timer');
     await expect(timer).toBeVisible();
 
-    // Scroll to the bottom of the page
+    // Scroll to the bottom of the page and wait for scroll to settle
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(100);
-
-    // Timer should still be visible in viewport
     await expect(timer).toBeInViewport();
   });
 
   test('visual snapshot of workout screen', async ({ page }) => {
-    await page.waitForTimeout(300);
+    // Wait for all set items to render before taking screenshot
+    await expect(page.locator('.set-item').first()).toBeVisible();
     await expect(page).toHaveScreenshot('workout-screen.png', {
       maxDiffPixelRatio: 0.05,
     });
