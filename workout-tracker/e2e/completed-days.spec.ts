@@ -78,6 +78,25 @@ test.describe('Completed Day Buttons', () => {
     await expect(completedButtons).toHaveCount(2);
   });
 
+  test('visual snapshot of home screen with completed days', async ({ page }) => {
+    // Complete Squat Day (day 0)
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await completeAllSets(page);
+    await page.click('#complete-workout-btn');
+    await page.waitForSelector('.home-screen');
+
+    // Complete Bench Day (day 1)
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await completeAllSets(page);
+    await page.click('#complete-workout-btn');
+    await page.waitForSelector('.home-screen');
+
+    // Snapshot with Squat and Bench completed, Deadlift active
+    await expect(page).toHaveScreenshot('home-completed-days.png');
+  });
+
   test('completed days reset when switching to a different week', async ({ page }) => {
     // Complete Squat Day in week 1
     await page.click('#start-workout-btn');
