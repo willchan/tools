@@ -6,6 +6,7 @@ import type {
   TrainingMax,
   WorkoutLog,
   TimerState,
+  UserSettings,
   AppData,
 } from './types';
 import { getDefaultExercises, getDefault531Template } from './defaults';
@@ -98,6 +99,20 @@ export async function putState(state: ProgressionState): Promise<void> {
   await db.put('state', state, 'current');
 }
 
+// --- Settings ---
+const DEFAULT_SETTINGS: UserSettings = { restTimerSeconds: 90, intersperseAccessories: false };
+
+export async function getSettings(): Promise<UserSettings> {
+  const db = await getDB();
+  const stored = await db.get('state', 'settings');
+  return stored ? { ...DEFAULT_SETTINGS, ...stored } : { ...DEFAULT_SETTINGS };
+}
+
+export async function putSettings(settings: UserSettings): Promise<void> {
+  const db = await getDB();
+  await db.put('state', settings, 'settings');
+}
+
 // --- Timer ---
 export async function getTimerState(): Promise<TimerState | null> {
   const db = await getDB();
@@ -126,13 +141,14 @@ export async function putWorkoutLog(log: WorkoutLog): Promise<void> {
 
 // --- Full Export / Import ---
 export async function exportAll(): Promise<AppData> {
-  const [exercises, templates, state, trainingMaxes, history, timerState] = await Promise.all([
+  const [exercises, templates, state, trainingMaxes, history, timerState, settings] = await Promise.all([
     getAllExercises(),
     getAllTemplates(),
     getState(),
     getAllTrainingMaxes(),
     getAllHistory(),
     getTimerState(),
+    getSettings(),
   ]);
   return {
     exercises,
@@ -141,6 +157,7 @@ export async function exportAll(): Promise<AppData> {
     trainingMaxes,
     history,
     timerState,
+    settings,
   };
 }
 
@@ -169,6 +186,9 @@ export async function importAll(data: AppData): Promise<void> {
   await tx.objectStore('state').put(data.state, 'current');
   if (data.timerState) {
     await tx.objectStore('timer').put(data.timerState, 'current');
+  }
+  if (data.settings) {
+    await tx.objectStore('state').put(data.settings, 'settings');
   }
 
   await tx.done;

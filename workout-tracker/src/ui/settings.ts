@@ -7,6 +7,8 @@ import {
   getState,
   putState,
   getAllTemplates,
+  getSettings,
+  putSettings,
 } from '../db/database';
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
@@ -17,6 +19,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   const exercises = await getAllExercises();
   const state = await getState();
   const templates = await getAllTemplates();
+  const settings = await getSettings();
   const template = templates.find((t) => t.id === state?.templateId);
 
   container.innerHTML = '';
@@ -63,6 +66,24 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   tmForm.appendChild(saveTmBtn);
   tmSection.appendChild(tmForm);
   main.appendChild(tmSection);
+
+  // Rest Timer section
+  const restSection = document.createElement('section');
+  restSection.innerHTML = `
+    <h2>Rest Timer</h2>
+    <div class="rest-timer-form">
+      <div class="form-group">
+        <label for="rest-timer-input">Duration (seconds)</label>
+        <input type="number" id="rest-timer-input"
+               data-testid="rest-timer-input"
+               value="${settings.restTimerSeconds}"
+               min="30" max="600" step="5" inputmode="numeric">
+        <span class="unit">sec</span>
+      </div>
+      <button id="save-settings-btn" class="btn btn-primary">Save</button>
+    </div>
+  `;
+  main.appendChild(restSection);
 
   // Progression Override section
   if (state && template) {
@@ -141,6 +162,16 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     setTimeout(() => {
       saveTmBtn.textContent = 'Save Training Maxes';
     }, 1500);
+  });
+
+  document.getElementById('save-settings-btn')?.addEventListener('click', async () => {
+    const restInput = document.getElementById('rest-timer-input') as HTMLInputElement;
+    const restSeconds = parseInt(restInput.value) || 90;
+    const currentSettings = await getSettings();
+    await putSettings({ ...currentSettings, restTimerSeconds: restSeconds });
+    const btn = document.getElementById('save-settings-btn')!;
+    btn.textContent = 'Saved!';
+    setTimeout(() => { btn.textContent = 'Save'; }, 1500);
   });
 
   document.getElementById('save-progression-btn')?.addEventListener('click', async () => {
