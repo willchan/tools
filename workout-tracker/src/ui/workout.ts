@@ -8,6 +8,8 @@ import {
   putTimerState,
   getTimerState,
   getSettings,
+  getActiveWorkout,
+  putActiveWorkout,
 } from '../db/database';
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates } from '../logic/calculator';
@@ -55,7 +57,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   const completedSets: CompletedSet[] = [];
   let currentSetIndex = 0;
-  const workoutStartTime = Date.now();
+  let workoutStartTime = Date.now();
+
+  // Restore in-progress workout if one exists for this same day
+  const activeWorkout = await getActiveWorkout();
+  if (
+    activeWorkout &&
+    activeWorkout.templateId === state.templateId &&
+    activeWorkout.cycle === state.cycle &&
+    activeWorkout.weekIndex === state.weekIndex &&
+    activeWorkout.dayIndex === state.dayIndex
+  ) {
+    completedSets.push(...activeWorkout.completedSets);
+    currentSetIndex = activeWorkout.currentSetIndex;
+    workoutStartTime = activeWorkout.startedAt;
+  }
 
   container.innerHTML = '';
 
@@ -65,6 +81,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     <button id="back-btn" class="btn btn-text">&larr; Back</button>
     <h1>${day.name}</h1>
     <span class="workout-meta">Cycle ${state.cycle} · ${week.name}</span>
+    <button id="abandon-workout-btn" class="btn btn-text btn-danger">Abandon</button>
   `;
   container.appendChild(header);
 
@@ -260,6 +277,17 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const justCompletedSet = set;
     currentSetIndex++;
 
+    // Persist in-progress state to IndexedDB
+    await putActiveWorkout({
+      templateId: state!.templateId,
+      cycle: state!.cycle,
+      weekIndex: state!.weekIndex,
+      dayIndex: state!.dayIndex,
+      completedSets: [...completedSets],
+      currentSetIndex,
+      startedAt: workoutStartTime,
+    });
+
     // Rest timer logic
     if (currentSetIndex < workoutSets.length) {
       if (settings.intersperseAccessories) {
@@ -430,6 +458,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     await putTimerState(null);
+    await putActiveWorkout(null);
 
     const { mainFailed, bbbFailed } = detectFailures();
     if (mainFailed.length > 0 || bbbFailed.length > 0) {
@@ -444,6 +473,39 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     navigate('home');
+  });
+
+  document.getElementById('abandon-workout-btn')?.addEventListener('click', () => {
+    // Show confirmation dialog
+    const existing = document.getElementById('abandon-confirm-dialog');
+    if (existing) existing.remove();
+
+    const dialog = document.createElement('div');
+    dialog.id = 'abandon-confirm-dialog';
+    dialog.className = 'abandon-dialog-overlay';
+    dialog.innerHTML = `
+      <div class="abandon-dialog-card">
+        <h2>Abandon Workout?</h2>
+        <p>Your progress on this workout will be lost.</p>
+        <div class="abandon-dialog-actions">
+          <button id="abandon-confirm-no" class="btn btn-text">Keep Going</button>
+          <button id="abandon-confirm-yes" class="btn btn-danger">Abandon</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('app')?.appendChild(dialog);
+
+    document.getElementById('abandon-confirm-yes')?.addEventListener('click', async () => {
+      await putActiveWorkout(null);
+      await putTimerState(null);
+      releaseWakeLock();
+      if (timerInterval) clearInterval(timerInterval);
+      navigate('home');
+    });
+
+    document.getElementById('abandon-confirm-no')?.addEventListener('click', () => {
+      dialog.remove();
+    });
   });
 
   completeBtn.addEventListener('click', completeWorkout);
