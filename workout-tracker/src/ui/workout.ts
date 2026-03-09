@@ -333,7 +333,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
     if (timerInterval) clearInterval(timerInterval);
 
+    let timerCompleting = false;
+
     const updateTimer = async () => {
+      if (timerCompleting) return;
+
       const savedTimer = await getTimerState();
       if (!savedTimer) {
         timerEl.classList.add('hidden');
@@ -347,6 +351,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       }
 
       if (remaining <= 0) {
+        timerCompleting = true;
         if (timerInterval) clearInterval(timerInterval);
         timerInterval = null;
         await putTimerState(null);
@@ -525,7 +530,9 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     if (remaining > 0) {
       timerEl.classList.remove('hidden');
       setDoneButtonDisabled(true);
+      let recoveryCompleting = false;
       timerInterval = setInterval(async () => {
+        if (recoveryCompleting) return;
         const saved = await getTimerState();
         if (!saved) {
           timerEl.classList.add('hidden');
@@ -536,6 +543,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         const tv = document.getElementById('timer-value');
         if (tv) tv.textContent = formatTime(r);
         if (r <= 0) {
+          recoveryCompleting = true;
           if (timerInterval) clearInterval(timerInterval);
           timerInterval = null;
           await putTimerState(null);
@@ -546,6 +554,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       }, 250);
     } else {
       await putTimerState(null);
+      fireTimerNotification();
     }
   }
 
