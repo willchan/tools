@@ -17,7 +17,7 @@ import { advanceState } from '../logic/progression';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
-import { requestNotificationPermission, fireTimerNotification } from './notifications';
+import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification } from './notifications';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let isResting = false;
@@ -327,6 +327,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   async function startRestTimer(restSeconds = settings.restTimerSeconds) {
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
+    scheduleBackgroundTimerNotification(timer.expectedEndTime);
 
     timerEl.classList.remove('hidden');
     setDoneButtonDisabled(true);
@@ -357,6 +358,8 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         await putTimerState(null);
         timerEl.classList.add('hidden');
         setDoneButtonDisabled(false);
+        // Cancel the SW background timer — the main thread is handling this one
+        cancelBackgroundTimerNotification();
         fireTimerNotification();
       }
     };
@@ -462,6 +465,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     // Cleanup
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
+    cancelBackgroundTimerNotification();
     await putTimerState(null);
     await putActiveWorkout(null);
 
@@ -477,6 +481,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   document.getElementById('back-btn')?.addEventListener('click', () => {
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
+    cancelBackgroundTimerNotification();
     navigate('home');
   });
 
@@ -505,6 +510,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       await putTimerState(null);
       releaseWakeLock();
       if (timerInterval) clearInterval(timerInterval);
+      cancelBackgroundTimerNotification();
       navigate('home');
     });
 
@@ -520,6 +526,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     timerInterval = null;
     timerEl.classList.add('hidden');
     setDoneButtonDisabled(false);
+    cancelBackgroundTimerNotification();
     await putTimerState(null);
   });
 
@@ -549,11 +556,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           await putTimerState(null);
           timerEl.classList.add('hidden');
           setDoneButtonDisabled(false);
+          cancelBackgroundTimerNotification();
           fireTimerNotification();
         }
       }, 250);
     } else {
       await putTimerState(null);
+      cancelBackgroundTimerNotification();
       fireTimerNotification();
     }
   }

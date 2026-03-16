@@ -50,15 +50,49 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Background timer: the SW owns its own timeout so notifications fire even
+// when the main thread is throttled or suspended by the browser.
+let backgroundTimerTimeout = null;
+
+function showTimerNotification() {
+  self.registration.showNotification('Rest Timer Complete', {
+    body: 'Time for your next set!',
+    icon: './icons/icon-192.png',
+    tag: 'rest-timer',
+    requireInteraction: false,
+  });
+}
+
 // Handle timer notification messages from the app
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'TIMER_DONE') {
-    self.registration.showNotification('Rest Timer Complete', {
-      body: 'Time for your next set!',
-      icon: './icons/icon-192.png',
-      tag: 'rest-timer',
-      requireInteraction: false,
-    });
+  if (!event.data) return;
+
+  if (event.data.type === 'TIMER_DONE') {
+    showTimerNotification();
+  }
+
+  if (event.data.type === 'TIMER_START') {
+    // Cancel any existing background timer
+    if (backgroundTimerTimeout !== null) {
+      clearTimeout(backgroundTimerTimeout);
+      backgroundTimerTimeout = null;
+    }
+    const delayMs = event.data.expectedEndTime - Date.now();
+    if (delayMs <= 0) {
+      showTimerNotification();
+    } else {
+      backgroundTimerTimeout = setTimeout(() => {
+        backgroundTimerTimeout = null;
+        showTimerNotification();
+      }, delayMs);
+    }
+  }
+
+  if (event.data.type === 'TIMER_CANCEL') {
+    if (backgroundTimerTimeout !== null) {
+      clearTimeout(backgroundTimerTimeout);
+      backgroundTimerTimeout = null;
+    }
   }
 });
 
