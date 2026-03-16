@@ -1,3 +1,17 @@
+function postToSW(message: Record<string, unknown>): void {
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage(message);
+  }
+}
+
+export function scheduleBackgroundTimerNotification(expectedEndTime: number): void {
+  postToSW({ type: 'TIMER_START', expectedEndTime });
+}
+
+export function cancelBackgroundTimerNotification(): void {
+  postToSW({ type: 'TIMER_CANCEL' });
+}
+
 export async function requestNotificationPermission(): Promise<boolean> {
   if (!('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
@@ -22,8 +36,11 @@ export function fireTimerNotification(): void {
     gain.connect(ctx.destination);
     osc.frequency.value = 880;
     gain.gain.value = 0.3;
-    osc.start();
-    osc.stop(ctx.currentTime + 0.3);
+    // Resume in case the context was suspended (common on mobile after backgrounding)
+    ctx.resume().then(() => {
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    });
   } catch {
     // AudioContext may not be available
   }
