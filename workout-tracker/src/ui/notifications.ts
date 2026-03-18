@@ -27,19 +27,24 @@ export function fireTimerNotification(): void {
     navigator.vibrate([200, 100, 200, 100, 200]);
   }
 
-  // Play a short beep sound as audio feedback
+  // Play a multi-beep audio pattern for attention
   try {
     const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 880;
-    gain.gain.value = 0.3;
-    // Resume in case the context was suspended (common on mobile after backgrounding)
     ctx.resume().then(() => {
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
+      const beepCount = 3;
+      const beepDuration = 0.2;
+      const gapDuration = 0.15;
+      for (let i = 0; i < beepCount; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        gain.gain.value = 0.7;
+        const startTime = ctx.currentTime + i * (beepDuration + gapDuration);
+        osc.start(startTime);
+        osc.stop(startTime + beepDuration);
+      }
     });
   } catch {
     // AudioContext may not be available
