@@ -77,8 +77,8 @@ test.describe('Timer Completion Attention', () => {
     });
 
     await page.waitForSelector('[data-testid="timer-expired"]', { timeout: 5000 });
-    // Should auto-dismiss within 4 seconds
-    await expect(page.locator('#rest-timer')).toBeHidden({ timeout: 5000 });
+    // Should auto-dismiss within 10 seconds
+    await expect(page.locator('#rest-timer')).toBeHidden({ timeout: 12000 });
   });
 
   test('tapping expired timer dismisses it immediately', async ({ page }) => {

@@ -386,8 +386,8 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     };
 
     el.addEventListener('click', dismiss);
-    // Auto-dismiss after 3 seconds
-    setTimeout(dismiss, 3000);
+    // Auto-dismiss after 10 seconds
+    setTimeout(dismiss, 10000);
   }
 
   function detectFailures() {
