@@ -61,6 +61,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   // Restore in-progress workout if one exists for this same day
   const activeWorkout = await getActiveWorkout();
+  let resumingActiveWorkout = false;
   if (
     activeWorkout &&
     activeWorkout.templateId === state.templateId &&
@@ -71,6 +72,15 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     completedSets.push(...activeWorkout.completedSets);
     currentSetIndex = activeWorkout.currentSetIndex;
     workoutStartTime = activeWorkout.startedAt;
+    resumingActiveWorkout = true;
+  }
+
+  // If starting fresh (not resuming), clear any stale timer state that may
+  // have been left over from a previous session (e.g. user pressed Back
+  // while a rest timer was running).
+  if (!resumingActiveWorkout) {
+    await putTimerState(null);
+    cancelBackgroundTimerNotification();
   }
 
   container.innerHTML = '';
@@ -498,10 +508,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   }
 
   // Event listeners
-  document.getElementById('back-btn')?.addEventListener('click', () => {
+  document.getElementById('back-btn')?.addEventListener('click', async () => {
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     cancelBackgroundTimerNotification();
+    await putTimerState(null);
     navigate('home');
   });
 

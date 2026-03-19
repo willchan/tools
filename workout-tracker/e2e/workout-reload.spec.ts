@@ -117,6 +117,58 @@ test.describe('Workout Reload Persistence', () => {
   });
 });
 
+test.describe('Back Button Timer Cleanup', () => {
+  /**
+   * Regression: pressing Back during a rest timer left the timer state in
+   * IndexedDB. On the next workout load, the recovery code would fire the
+   * notification and/or show "Time's Up!" immediately.
+   */
+  test('stale timer from previous session does not fire on new workout start', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as any).__vibrateCount = 0;
+      Object.defineProperty(navigator, 'vibrate', {
+        value: () => { (window as any).__vibrateCount++; return true; },
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Seed a stale timer (still has ~2 seconds remaining) — simulating what
+    // the Back button leaves behind because it doesn't clear IndexedDB timer state.
+    await page.evaluate(async () => {
+      const { putTimerState } = await import('/src/db/database.ts');
+      await putTimerState({
+        expectedEndTime: Date.now() + 2000, // expires in 2 seconds
+        durationMs: 90000,
+      });
+    });
+
+    // Navigate to home (simulating Back button navigation)
+    await page.evaluate(() => { window.location.hash = 'home'; });
+    await page.waitForSelector('#start-workout-btn');
+    await page.evaluate(() => { (window as any).__vibrateCount = 0; });
+
+    // Start a new workout — stale timer should be cleared, not re-used
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Wait long enough for the stale timer to expire (>2s)
+    await page.waitForTimeout(2500);
+
+    // No notification should have fired from the stale timer
+    const vibrateCount = await page.evaluate(() => (window as any).__vibrateCount);
+    expect(vibrateCount).toBe(0);
+
+    // No "Time's Up!" UI should have appeared
+    await expect(page.locator('[data-testid="timer-expired"]')).not.toBeAttached();
+  });
+});
+
 test.describe('Cancel/Abandon Workout', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
