@@ -284,6 +284,20 @@ body {
   display: none;
 }
 
+.rest-timer.timer-expired {
+  animation: timer-flash 0.5s ease-in-out infinite alternate;
+  cursor: pointer;
+}
+
+@keyframes timer-flash {
+  from {
+    background: var(--color-accent);
+  }
+  to {
+    background: var(--color-danger);
+  }
+}
+
 .timer-label {
   font-size: 0.9rem;
   font-weight: 700;

@@ -356,16 +356,38 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         if (timerInterval) clearInterval(timerInterval);
         timerInterval = null;
         await putTimerState(null);
-        timerEl.classList.add('hidden');
         setDoneButtonDisabled(false);
         // Cancel the SW background timer — the main thread is handling this one
         cancelBackgroundTimerNotification();
         fireTimerNotification();
+        showTimerExpired(timerEl);
       }
     };
 
     timerInterval = setInterval(updateTimer, 250);
     updateTimer();
+  }
+
+  function showTimerExpired(el: HTMLElement) {
+    el.classList.remove('hidden');
+    el.classList.add('timer-expired');
+    el.dataset.testid = 'timer-expired';
+    const timerValue = document.getElementById('timer-value');
+    if (timerValue) timerValue.textContent = "Time's Up!";
+    // Hide skip button during expired state
+    const skipBtn = document.getElementById('skip-timer-btn');
+    if (skipBtn) skipBtn.classList.add('hidden');
+
+    const dismiss = () => {
+      el.classList.add('hidden');
+      el.classList.remove('timer-expired');
+      delete el.dataset.testid;
+      el.removeEventListener('click', dismiss);
+    };
+
+    el.addEventListener('click', dismiss);
+    // Auto-dismiss after 10 seconds
+    setTimeout(dismiss, 10000);
   }
 
   function detectFailures() {
@@ -554,16 +576,17 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           if (timerInterval) clearInterval(timerInterval);
           timerInterval = null;
           await putTimerState(null);
-          timerEl.classList.add('hidden');
           setDoneButtonDisabled(false);
           cancelBackgroundTimerNotification();
           fireTimerNotification();
+          showTimerExpired(timerEl);
         }
       }, 250);
     } else {
       await putTimerState(null);
       cancelBackgroundTimerNotification();
       fireTimerNotification();
+      showTimerExpired(timerEl);
     }
   }
 
