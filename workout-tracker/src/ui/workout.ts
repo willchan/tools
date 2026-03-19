@@ -374,7 +374,6 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     el.dataset.testid = 'timer-expired';
     const timerValue = document.getElementById('timer-value');
     if (timerValue) timerValue.textContent = "Time's Up!";
-    // Hide skip button during expired state
     const skipBtn = document.getElementById('skip-timer-btn');
     if (skipBtn) skipBtn.classList.add('hidden');
 
@@ -386,7 +385,6 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     };
 
     el.addEventListener('click', dismiss);
-    // Auto-dismiss after 10 seconds
     setTimeout(dismiss, 10000);
   }
 
@@ -586,7 +584,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       await putTimerState(null);
       cancelBackgroundTimerNotification();
       fireTimerNotification();
-      showTimerExpired(timerEl);
+      timerEl.classList.add('hidden');
     }
   }
 
