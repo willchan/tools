@@ -101,7 +101,7 @@ test.describe('Rest Timer Notification Reliability', () => {
     const vibrateCount = await page.evaluate(() => (window as any).__vibrateCount);
     expect(vibrateCount).toBe(1);
 
-    // Timer should be hidden
-    await expect(page.locator('#rest-timer')).toBeHidden();
+    // Timer should show expired state (active countdown stopped)
+    await expect(page.locator('[data-testid="timer-expired"]')).toBeVisible();
   });
 });

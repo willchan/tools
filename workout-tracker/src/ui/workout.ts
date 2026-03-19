@@ -360,12 +360,32 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         // Cancel the SW background timer — the main thread is handling this one
         cancelBackgroundTimerNotification();
         fireTimerNotification();
-        timerEl.classList.add('hidden');
+        showTimerExpired(timerEl);
       }
     };
 
     timerInterval = setInterval(updateTimer, 250);
     updateTimer();
+  }
+
+  function showTimerExpired(el: HTMLElement) {
+    el.classList.remove('hidden');
+    el.classList.add('timer-expired');
+    el.dataset.testid = 'timer-expired';
+    const timerValue = document.getElementById('timer-value');
+    if (timerValue) timerValue.textContent = "Time's Up!";
+    const skipBtn = document.getElementById('skip-timer-btn');
+    if (skipBtn) skipBtn.classList.add('hidden');
+
+    const dismiss = () => {
+      el.classList.add('hidden');
+      el.classList.remove('timer-expired');
+      delete el.dataset.testid;
+      el.removeEventListener('click', dismiss);
+    };
+
+    el.addEventListener('click', dismiss);
+    setTimeout(dismiss, 10000);
   }
 
   function detectFailures() {
@@ -557,7 +577,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           setDoneButtonDisabled(false);
           cancelBackgroundTimerNotification();
           fireTimerNotification();
-          timerEl.classList.add('hidden');
+          showTimerExpired(timerEl);
         }
       }, 250);
     } else {
