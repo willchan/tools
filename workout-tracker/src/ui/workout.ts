@@ -362,6 +362,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       }
 
       if (remaining <= 0) {
+        // Second guard: multiple ticks may have all passed the first check
+        // concurrently (each awaited getTimerState() before any set the flag).
+        // This synchronous re-check prevents duplicate completion.
+        if (timerCompleting) return;
         timerCompleting = true;
         if (timerInterval) clearInterval(timerInterval);
         timerInterval = null;

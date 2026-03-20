@@ -52,15 +52,15 @@ export function fireTimerNotification(): void {
 
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-  // Try service worker notification first (works in background)
+  // The service worker's backup timer (set on TIMER_START) is the sole source
+  // of push notifications. Sending TIMER_DONE here would race with that timer
+  // and replace the notification, causing a visible flicker or duplicates.
+  // Fall through to a regular notification only when there is no SW controller.
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage({
-      type: 'TIMER_DONE',
-    });
     return;
   }
 
-  // Fallback to regular notification
+  // Fallback: no SW controller, show a regular notification directly
   new Notification('Rest Timer Complete', {
     body: 'Time for your next set!',
     icon: './icons/icon-192.png',
