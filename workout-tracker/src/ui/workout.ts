@@ -58,6 +58,8 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   const completedSets: CompletedSet[] = [];
   let currentSetIndex = 0;
   let workoutStartTime = Date.now();
+  let timerExpiredTimeout: ReturnType<typeof setTimeout> | null = null;
+  let timerExpiredClickDismiss: (() => void) | null = null;
 
   // Restore in-progress workout if one exists for this same day
   const activeWorkout = await getActiveWorkout();
@@ -335,6 +337,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   }
 
   async function startRestTimer(restSeconds = settings.restTimerSeconds) {
+    // Cancel any stale "Time's Up!" auto-dismiss from a previous expired timer.
+    if (timerExpiredTimeout !== null) {
+      clearTimeout(timerExpiredTimeout);
+      timerExpiredTimeout = null;
+    }
+    if (timerExpiredClickDismiss !== null) {
+      timerEl.removeEventListener('click', timerExpiredClickDismiss);
+      timerExpiredClickDismiss = null;
+    }
+    // Reset the element from any expired visual state.
+    timerEl.classList.remove('timer-expired');
+    delete timerEl.dataset.testid;
+    const skipBtnEl = document.getElementById('skip-timer-btn');
+    if (skipBtnEl) skipBtnEl.classList.remove('hidden');
+
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
     scheduleBackgroundTimerNotification(timer.expectedEndTime);
@@ -392,10 +409,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       el.classList.remove('timer-expired');
       delete el.dataset.testid;
       el.removeEventListener('click', dismiss);
+      timerExpiredTimeout = null;
+      timerExpiredClickDismiss = null;
     };
 
+    timerExpiredClickDismiss = dismiss;
     el.addEventListener('click', dismiss);
-    setTimeout(dismiss, 10000);
+    timerExpiredTimeout = setTimeout(dismiss, 10000);
   }
 
   function detectFailures() {
