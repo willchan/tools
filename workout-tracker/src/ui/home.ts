@@ -40,6 +40,26 @@ export async function renderHome(container: HTMLElement): Promise<void> {
         .map((log) => log.dayIndex)
     );
 
+    // Auto-correct stale position: if the current day is already completed, advance
+    // to the first incomplete day. Recovers when the week picker navigates back to a
+    // finished week and the user would otherwise be stuck with all buttons disabled.
+    if (week && completedDayIndices.has(state.dayIndex)) {
+      const firstIncomplete = week.days.findIndex((_, i) => !completedDayIndices.has(i));
+      if (firstIncomplete >= 0) {
+        await putState({ ...state, dayIndex: firstIncomplete });
+        return renderHome(container);
+      }
+      // All days in this week are done — advance to the next week/cycle.
+      // TM bumps were already applied by completeWorkout(); only the position changes.
+      const nextWeek = state.weekIndex + 1;
+      if (nextWeek < template.weeks.length) {
+        await putState({ ...state, weekIndex: nextWeek, dayIndex: 0 });
+      } else {
+        await putState({ ...state, cycle: state.cycle + 1, weekIndex: 0, dayIndex: 0 });
+      }
+      return renderHome(container);
+    }
+
     const dayPickerButtons = week?.days.map((d, i) => {
       const isCompleted = completedDayIndices.has(i);
       const classes = ['day-picker-btn'];
