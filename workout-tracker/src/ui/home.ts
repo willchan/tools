@@ -145,8 +145,22 @@ export async function renderHome(container: HTMLElement): Promise<void> {
     btn.addEventListener('click', async () => {
       const newWeekIndex = parseInt((btn as HTMLElement).dataset.weekIndex!);
       if (state && template) {
-        const newState: ProgressionState = { ...state, weekIndex: newWeekIndex, dayIndex: 0 };
-        await putState(newState);
+        // Re-clicking the active week must not reset the day selection.
+        if (newWeekIndex === state.weekIndex) return;
+
+        // Set dayIndex to the first incomplete day in the target week so that
+        // the auto-correction in renderHome won't fire a second putState and
+        // accidentally overwrite the intended position.
+        const newWeek = template.weeks[newWeekIndex];
+        const completedInNewWeek = new Set(
+          history
+            .filter((log) => log.templateId === state.templateId && log.cycle === state.cycle && log.weekIndex === newWeekIndex)
+            .map((log) => log.dayIndex)
+        );
+        const firstIncomplete = newWeek.days.findIndex((_, i) => !completedInNewWeek.has(i));
+        // Fall back to 0 when all days are done (auto-correction will advance to next week).
+        const newDayIndex = firstIncomplete >= 0 ? firstIncomplete : 0;
+        await putState({ ...state, weekIndex: newWeekIndex, dayIndex: newDayIndex });
         renderHome(container);
       }
     });
