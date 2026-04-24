@@ -116,6 +116,54 @@ test.describe('Completed Day Buttons', () => {
     await expect(page.locator('[data-testid="day-picker"] .day-picker-btn.completed')).toHaveCount(0);
   });
 
+  test('week picker preserves manually-selected day when re-clicking the active week', async ({ page }) => {
+    // Complete Squat Day (day 0) — state advances to Bench Day (day 1)
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await completeAllSets(page);
+    await page.click('#complete-workout-btn');
+    await page.waitForSelector('.home-screen');
+
+    // Manually select Deadlift Day (day 2) via the day picker
+    const dayPicker = page.locator('[data-testid="day-picker"]');
+    const deadliftBtn = dayPicker.locator('.day-picker-btn:nth-child(3)');
+    await deadliftBtn.click();
+    await expect(deadliftBtn).toHaveClass(/active/);
+
+    // Click the already-active Week 1 button — should NOT reset the day selection
+    await page.click('.week-picker-btn:nth-child(1)');
+
+    // Navigate away and back to force a fresh state read from IndexedDB
+    await page.click('.nav-btn[data-route="history"]');
+    await page.waitForSelector('.history-screen');
+    await page.click('.nav-btn[data-route="home"]');
+    await page.waitForSelector('.home-screen');
+
+    // Deadlift Day (day 2) should still be active — the week button click must not reset it
+    await expect(dayPicker.locator('.day-picker-btn.active')).toContainText('Deadlift');
+  });
+
+  test('week picker navigating to a different week shows first incomplete day', async ({ page }) => {
+    // Complete Squat Day (day 0) — state advances to Bench Day (day 1)
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await completeAllSets(page);
+    await page.click('#complete-workout-btn');
+    await page.waitForSelector('.home-screen');
+
+    // Switch to Week 2 (no completions there) and back to Week 1
+    await page.click('.week-picker-btn:nth-child(2)');
+    await expect(page.locator('.week-picker-btn.active')).toContainText('Week 2');
+    await page.click('.week-picker-btn:nth-child(1)');
+    await expect(page.locator('.week-picker-btn.active')).toContainText('Week 1');
+
+    // Week 1: Squat is done, so first incomplete is Bench Day (day 1)
+    const dp = page.locator('[data-testid="day-picker"]');
+    await expect(dp.locator('.day-picker-btn.active')).toContainText('Bench');
+    await expect(dp.locator('.day-picker-btn.completed')).toHaveCount(1);
+    await expect(dp.locator('.day-picker-btn.completed').first()).toContainText('Squat');
+  });
+
   test('auto-corrects to next week when week picker navigates to a fully-completed week', async ({ page }) => {
     test.setTimeout(60_000);
     // Complete all 4 days of week 1
