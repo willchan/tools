@@ -152,6 +152,7 @@ export async function renderHome(container: HTMLElement): Promise<void> {
         // the auto-correction in renderHome won't fire a second putState and
         // accidentally overwrite the intended position.
         const newWeek = template.weeks[newWeekIndex];
+        if (!newWeek) return;
         const completedInNewWeek = new Set(
           history
             .filter((log) => log.templateId === state.templateId && log.cycle === state.cycle && log.weekIndex === newWeekIndex)
