@@ -17,7 +17,7 @@ import { advanceState } from '../logic/progression';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
-import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification } from './notifications';
+import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification, primeAudioContext } from './notifications';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let isResting = false;
@@ -231,7 +231,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   function attachSetHandlers() {
     const doneBtn = setsContainer.querySelector('.done-set-btn') as HTMLButtonElement | null;
-    doneBtn?.addEventListener('click', () => markSetDone());
+    doneBtn?.addEventListener('click', () => {
+      // Prime synchronously inside the user gesture so the beep can play
+      // ~90s later despite the browser's autoplay policy.
+      primeAudioContext();
+      markSetDone();
+    });
 
     const toggleBtn = setsContainer.querySelector('[data-testid="missed-reps-toggle"]') as HTMLButtonElement | null;
     toggleBtn?.addEventListener('click', () => {
