@@ -6,6 +6,9 @@ import { renderWorkout } from './ui/workout';
 import { renderTemplates, renderTemplateEdit } from './ui/templates';
 import { renderHistory } from './ui/history';
 import { renderSettings } from './ui/settings';
+import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
+
+installGlobalErrorHandlers();
 
 const app = document.getElementById('app')!;
 
@@ -20,6 +23,8 @@ registerRoute('settings', () => renderSettings(app));
 // Initialize
 async function init() {
   await seedDefaults();
+  await pruneOldLogs();
+  await log('info', 'app started');
   startRouter();
 }
 
