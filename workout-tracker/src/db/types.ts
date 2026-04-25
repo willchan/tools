@@ -96,6 +96,16 @@ export interface ActiveWorkout {
   startedAt: number;
 }
 
+/** A persistent log entry kept for diagnostic exports. */
+export interface LogEntry {
+  id?: number;
+  timestamp: number;
+  level: 'log' | 'info' | 'warn' | 'error';
+  message: string;
+  context?: string;
+  stack?: string;
+}
+
 /** Full export shape for sync. */
 export interface AppData {
   exercises: Exercise[];

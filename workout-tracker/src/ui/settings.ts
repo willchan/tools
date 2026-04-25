@@ -13,6 +13,7 @@ import {
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
 import { requestNotificationPermission } from './notifications';
+import { getAllLogs, clearLogs } from '../logic/logger';
 
 export async function renderSettings(container: HTMLElement): Promise<void> {
   const tms = await getAllTrainingMaxes();
@@ -20,6 +21,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   const state = await getState();
   const templates = await getAllTemplates();
   const settings = await getSettings();
+  const logs = await getAllLogs();
   const template = templates.find((t) => t.id === state?.templateId);
 
   container.innerHTML = '';
@@ -122,6 +124,20 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   `;
   main.appendChild(notifSection);
 
+  // Debug Logs section
+  const logsSection = document.createElement('section');
+  logsSection.dataset.testid = 'debug-logs';
+  logsSection.innerHTML = `
+    <h2>Debug Logs</h2>
+    <p>App keeps the last 7 days of errors locally. Export the file and share with Claude when you hit an issue.</p>
+    <p data-testid="log-count">Stored entries: <strong>${logs.length}</strong></p>
+    <div class="data-actions">
+      <button id="export-logs-btn" class="btn btn-secondary">Export Logs (JSON)</button>
+      <button id="clear-logs-btn" class="btn btn-text">Clear Logs</button>
+    </div>
+  `;
+  main.appendChild(logsSection);
+
   // Export/Import section
   const dataSection = document.createElement('section');
   dataSection.innerHTML = `
@@ -207,6 +223,28 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     a.download = `workout-data-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('export-logs-btn')?.addEventListener('click', async () => {
+    const entries = await getAllLogs();
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      entries,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `workout-logs-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('clear-logs-btn')?.addEventListener('click', async () => {
+    if (!confirm('Clear all stored debug logs?')) return;
+    await clearLogs();
+    renderSettings(container);
   });
 
   document.getElementById('import-btn')?.addEventListener('click', () => {

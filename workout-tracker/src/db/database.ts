@@ -13,7 +13,7 @@ import type {
 import { getDefaultExercises, getDefault531Template } from './defaults';
 
 const DB_NAME = 'workout-tracker';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type WorkoutDB = IDBPDatabase;
 
@@ -22,14 +22,20 @@ let dbPromise: Promise<WorkoutDB> | null = null;
 export function getDB(): Promise<WorkoutDB> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        db.createObjectStore('exercises', { keyPath: 'id' });
-        db.createObjectStore('templates', { keyPath: 'id' });
-        db.createObjectStore('trainingMaxes', { keyPath: 'exerciseId' });
-        db.createObjectStore('history', { keyPath: 'id' });
-        // Single-value stores
-        db.createObjectStore('state');
-        db.createObjectStore('timer');
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          db.createObjectStore('exercises', { keyPath: 'id' });
+          db.createObjectStore('templates', { keyPath: 'id' });
+          db.createObjectStore('trainingMaxes', { keyPath: 'exerciseId' });
+          db.createObjectStore('history', { keyPath: 'id' });
+          // Single-value stores
+          db.createObjectStore('state');
+          db.createObjectStore('timer');
+        }
+        if (oldVersion < 2) {
+          const logs = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+          logs.createIndex('timestamp', 'timestamp');
+        }
       },
     });
   }
