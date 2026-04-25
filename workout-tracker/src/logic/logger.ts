@@ -68,6 +68,12 @@ export function installGlobalErrorHandlers(): void {
     const stack = reason instanceof Error ? reason.stack : undefined;
     void log('error', `Unhandled rejection: ${message}`, undefined, stack).catch(() => {});
   });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      void pruneOldLogs().catch(() => {});
+    }
+  });
 }
 
 function safeStringify(value: unknown): string {

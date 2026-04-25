@@ -119,4 +119,28 @@ test.describe('Debug Logs', () => {
     expect(after).toContain('fresh');
     expect(after).not.toContain('ancient');
   });
+
+  test('prunes on visibilitychange when tab becomes visible', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { getDB } = await import('/src/db/database.ts');
+      const db = await getDB();
+      const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
+      await db.add('logs', {
+        timestamp: eightDaysAgo,
+        level: 'info',
+        message: 'ancient-vis',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const { getAllLogs } = await import('/src/logic/logger.ts');
+          const logs = await getAllLogs();
+          return logs.some((l) => l.message === 'ancient-vis');
+        }),
+      )
+      .toBe(false);
+  });
 });
