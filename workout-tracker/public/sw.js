@@ -53,14 +53,30 @@ self.addEventListener('fetch', (event) => {
 // Background timer: the SW owns its own timeout so notifications fire even
 // when the main thread is throttled or suspended by the browser.
 let backgroundTimerTimeout = null;
+// Dedupe key: the SW fires showTimerNotification at most once per
+// scheduledEndTime, regardless of which path triggered it (its own setTimeout
+// or a TIMER_DONE message from the page when both race at expiry).
+let scheduledEndTime = null;
+let firedForEndTime = null;
+
+function broadcastNotificationShown() {
+  self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    for (const client of clients) {
+      client.postMessage({ type: 'TIMER_NOTIFICATION_SHOWN' });
+    }
+  });
+}
 
 function showTimerNotification() {
+  if (scheduledEndTime !== null && firedForEndTime === scheduledEndTime) return;
+  firedForEndTime = scheduledEndTime;
   self.registration.showNotification('Rest Timer Complete', {
     body: 'Time for your next set!',
     icon: './icons/icon-192.png',
     tag: 'rest-timer',
     requireInteraction: false,
   });
+  broadcastNotificationShown();
 }
 
 // Handle timer notification messages from the app
@@ -77,6 +93,8 @@ self.addEventListener('message', (event) => {
       clearTimeout(backgroundTimerTimeout);
       backgroundTimerTimeout = null;
     }
+    scheduledEndTime = event.data.expectedEndTime;
+    firedForEndTime = null;
     const delayMs = event.data.expectedEndTime - Date.now();
     if (delayMs <= 0) {
       showTimerNotification();
@@ -93,6 +111,8 @@ self.addEventListener('message', (event) => {
       clearTimeout(backgroundTimerTimeout);
       backgroundTimerTimeout = null;
     }
+    scheduledEndTime = null;
+    firedForEndTime = null;
   }
 });
 
