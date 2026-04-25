@@ -41,24 +41,18 @@ export async function renderHome(container: HTMLElement): Promise<void> {
     );
 
     // Auto-correct stale position: if the current day is already completed, advance
-    // to the first incomplete day. Recovers when the week picker navigates back to a
-    // finished week and the user would otherwise be stuck with all buttons disabled.
+    // to the first incomplete day within this week. Only corrects dayIndex — never
+    // jumps to the next week. True week/cycle progression is handled by completeWorkout().
     if (week && completedDayIndices.has(state.dayIndex)) {
       const firstIncomplete = week.days.findIndex((_, i) => !completedDayIndices.has(i));
       if (firstIncomplete >= 0) {
         await putState({ ...state, dayIndex: firstIncomplete });
         return renderHome(container);
       }
-      // All days in this week are done — advance to the next week/cycle.
-      // TM bumps were already applied by completeWorkout(); only the position changes.
-      const nextWeek = state.weekIndex + 1;
-      if (nextWeek < template.weeks.length) {
-        await putState({ ...state, weekIndex: nextWeek, dayIndex: 0 });
-      } else {
-        await putState({ ...state, cycle: state.cycle + 1, weekIndex: 0, dayIndex: 0 });
-      }
-      return renderHome(container);
+      // All days in this week are done — fall through and show the week as complete.
     }
+
+    const allDaysComplete = week ? week.days.every((_, i) => completedDayIndices.has(i)) : false;
 
     const dayPickerButtons = week?.days.map((d, i) => {
       const isCompleted = completedDayIndices.has(i);
@@ -75,14 +69,14 @@ export async function renderHome(container: HTMLElement): Promise<void> {
         <p class="cycle-info">Cycle ${state.cycle} · ${week?.name ?? 'Unknown'}</p>
         <div class="week-picker" data-testid="week-picker">${weekPickerButtons}</div>
         <div class="day-picker" data-testid="day-picker">${dayPickerButtons}</div>
-        <p class="day-name">${day?.name ?? 'Unknown'}</p>
-        <label class="intersperse-option" data-testid="intersperse-label">
+        <p class="day-name">${allDaysComplete ? 'Week complete — select another week or update your position in Settings' : (day?.name ?? 'Unknown')}</p>
+        <label class="intersperse-option" data-testid="intersperse-label" ${allDaysComplete ? 'style="display:none"' : ''}>
           <input type="checkbox" id="intersperse-checkbox"
                  data-testid="intersperse-checkbox"
                  ${settings.intersperseAccessories ? 'checked' : ''}>
           <span>Intersperse accessories between main sets</span>
         </label>
-        <button id="start-workout-btn" class="btn btn-primary btn-large">
+        <button id="start-workout-btn" class="btn btn-primary btn-large" ${allDaysComplete ? 'disabled' : ''}>
           Start Next Workout
         </button>
       </div>
