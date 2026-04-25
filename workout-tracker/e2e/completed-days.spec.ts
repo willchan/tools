@@ -164,7 +164,7 @@ test.describe('Completed Day Buttons', () => {
     await expect(dp.locator('.day-picker-btn.completed').first()).toContainText('Squat');
   });
 
-  test('auto-corrects to next week when week picker navigates to a fully-completed week', async ({ page }) => {
+  test('navigating to a fully-completed week shows it as complete without cascading forward', async ({ page }) => {
     test.setTimeout(60_000);
     // Complete all 4 days of week 1
     for (let i = 0; i < 4; i++) {
@@ -182,16 +182,17 @@ test.describe('Completed Day Buttons', () => {
     await page.click('.week-picker-btn:nth-child(1)');
 
     // Navigate away and back to force a fresh render from the persisted state.
-    // Without auto-correction the state remains on week 1; with it the state is
-    // corrected to week 2 before being saved, so the next render shows week 2.
     await page.click('.nav-btn[data-route="history"]');
     await page.waitForSelector('.history-screen');
     await page.click('.nav-btn[data-route="home"]');
     await page.waitForSelector('.home-screen');
 
-    // App should have auto-corrected back to week 2 rather than leaving the user stuck
-    await expect(page.locator('.week-picker-btn.active')).toContainText('Week 2');
-    await expect(page.locator('.cycle-info')).toContainText('Week 2');
-    await expect(page.locator('[data-testid="day-picker"] .day-picker-btn.completed')).toHaveCount(0);
+    // App should stay on week 1 (fully complete) rather than cascading forward to week 2.
+    // The user intentionally navigated here; completeWorkout() handles true advancement.
+    await expect(page.locator('.week-picker-btn.active')).toContainText('Week 1');
+    await expect(page.locator('.cycle-info')).toContainText('Week 1');
+    await expect(page.locator('[data-testid="day-picker"] .day-picker-btn.completed')).toHaveCount(4);
+    // Start button is disabled when all days are complete
+    await expect(page.locator('#start-workout-btn')).toBeDisabled();
   });
 });
