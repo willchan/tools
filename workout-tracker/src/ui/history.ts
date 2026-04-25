@@ -1,4 +1,4 @@
-import { getAllHistory, putWorkoutLog, getAllTemplates, getState } from '../db/database';
+import { getAllHistory, putWorkoutLog, deleteWorkoutLog, getAllTemplates, getState } from '../db/database';
 import type { WorkoutLog } from '../db/types';
 import { navigate, type Route } from './router';
 
@@ -53,7 +53,10 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
         <p class="history-meta">Cycle ${log.cycle} · Week ${log.weekIndex + 1} · ${duration} min</p>
         <p class="history-sets">${log.sets.length} sets completed</p>
         ${log.sets.filter((s) => s.isAmrap).map((s) => `<p class="history-amrap">AMRAP: ${s.exerciseId} — ${s.actualReps} reps @ ${s.weight} lbs</p>`).join('')}
-        <button class="btn btn-small btn-secondary edit-workout-btn" data-testid="edit-workout-btn" data-log-id="${log.id}">Edit</button>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="btn btn-small btn-secondary edit-workout-btn" data-testid="edit-workout-btn" data-log-id="${log.id}">Edit</button>
+          <button class="btn btn-small btn-danger delete-workout-btn" data-testid="delete-workout-btn" data-log-id="${log.id}">Delete</button>
+        </div>
       `;
       list.appendChild(card);
     }
@@ -86,6 +89,19 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
     });
   });
 
+  // Delete workout buttons
+  container.querySelectorAll('.delete-workout-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const logId = (btn as HTMLElement).dataset.logId!;
+      const log = history.find((l) => l.id === logId);
+      if (!log) return;
+      if (confirm(`Delete "${log.dayName}" on ${new Date(log.completedAt).toLocaleDateString()}?`)) {
+        await deleteWorkoutLog(logId);
+        renderHistory(container);
+      }
+    });
+  });
+
   // Add past workout button
   addPastBtn.addEventListener('click', () => {
     renderAddPastForm(container, main);
@@ -99,8 +115,24 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
   });
 }
 
-function renderEditForm(container: HTMLElement, main: HTMLElement, log: WorkoutLog): void {
+async function renderEditForm(container: HTMLElement, main: HTMLElement, log: WorkoutLog): Promise<void> {
+  const templates = await getAllTemplates();
+  const state = await getState();
+  const template = templates.find((t) => t.id === log.templateId) ?? templates.find((t) => t.id === state?.templateId);
+
   const dateValue = new Date(log.completedAt).toISOString().split('T')[0];
+
+  const weekOptions = template
+    ? template.weeks.map((w, i) =>
+        `<option value="${i}" ${i === log.weekIndex ? 'selected' : ''}>${w.name}</option>`
+      ).join('')
+    : `<option value="${log.weekIndex}">Week ${log.weekIndex + 1}</option>`;
+
+  const dayOptions = template
+    ? template.weeks[log.weekIndex].days.map((d, i) =>
+        `<option value="${i}" ${i === log.dayIndex ? 'selected' : ''}>${d.name}</option>`
+      ).join('')
+    : `<option value="${log.dayIndex}">${log.dayName}</option>`;
 
   main.innerHTML = '';
   const form = document.createElement('div');
@@ -132,6 +164,19 @@ function renderEditForm(container: HTMLElement, main: HTMLElement, log: WorkoutL
       <label for="edit-workout-date">Date</label>
       <input type="date" id="edit-workout-date" data-testid="edit-workout-date" value="${dateValue}">
     </div>
+    <div class="form-group">
+      <label for="edit-workout-cycle">Cycle</label>
+      <input type="number" id="edit-workout-cycle" data-testid="edit-workout-cycle"
+             value="${log.cycle}" min="1" inputmode="numeric" style="width: 80px;">
+    </div>
+    <div class="form-group">
+      <label for="edit-workout-week">Week</label>
+      <select id="edit-workout-week" data-testid="edit-workout-week">${weekOptions}</select>
+    </div>
+    <div class="form-group">
+      <label for="edit-workout-day">Day</label>
+      <select id="edit-workout-day" data-testid="edit-workout-day">${dayOptions}</select>
+    </div>
     <h3 style="margin: 12px 0 8px;">Sets</h3>
     ${setsHtml}
     <div class="form-actions" style="margin-top: 16px;">
@@ -142,9 +187,29 @@ function renderEditForm(container: HTMLElement, main: HTMLElement, log: WorkoutL
 
   main.appendChild(form);
 
+  // Update day options when week changes
+  if (template) {
+    document.getElementById('edit-workout-week')?.addEventListener('change', () => {
+      const weekIdx = parseInt((document.getElementById('edit-workout-week') as HTMLSelectElement).value);
+      const week = template.weeks[weekIdx];
+      const daySelect = document.getElementById('edit-workout-day') as HTMLSelectElement;
+      daySelect.innerHTML = week.days.map((d, i) =>
+        `<option value="${i}">${d.name}</option>`
+      ).join('');
+    });
+  }
+
   document.getElementById('save-workout-edit-btn')?.addEventListener('click', async () => {
     const dateInput = document.getElementById('edit-workout-date') as HTMLInputElement;
+    const cycleInput = document.getElementById('edit-workout-cycle') as HTMLInputElement;
+    const weekSelect = document.getElementById('edit-workout-week') as HTMLSelectElement;
+    const daySelect = document.getElementById('edit-workout-day') as HTMLSelectElement;
     const newDate = new Date(dateInput.value + 'T12:00:00');
+
+    const newCycle = parseInt(cycleInput.value) || log.cycle;
+    const newWeekIndex = parseInt(weekSelect.value);
+    const newDayIndex = parseInt(daySelect.value);
+    const newDayName = template?.weeks[newWeekIndex]?.days[newDayIndex]?.name ?? log.dayName;
 
     const updatedSets = [...log.sets];
     form.querySelectorAll('.edit-set-reps').forEach((input) => {
@@ -164,6 +229,10 @@ function renderEditForm(container: HTMLElement, main: HTMLElement, log: WorkoutL
 
     const updatedLog: WorkoutLog = {
       ...log,
+      cycle: newCycle,
+      weekIndex: newWeekIndex,
+      dayIndex: newDayIndex,
+      dayName: newDayName,
       sets: updatedSets,
       completedAt: newDate.getTime(),
       startedAt: newDate.getTime() - (log.completedAt - log.startedAt),

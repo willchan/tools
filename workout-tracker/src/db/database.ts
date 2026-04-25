@@ -155,6 +155,11 @@ export async function putWorkoutLog(log: WorkoutLog): Promise<void> {
   await db.put('history', log);
 }
 
+export async function deleteWorkoutLog(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('history', id);
+}
+
 // --- Full Export / Import ---
 export async function exportAll(): Promise<AppData> {
   const [exercises, templates, state, trainingMaxes, history, timerState, settings] = await Promise.all([
