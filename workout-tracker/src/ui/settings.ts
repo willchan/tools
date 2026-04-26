@@ -262,6 +262,8 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     const entries = await getAllLogs();
     const payload = {
       exportedAt: new Date().toISOString(),
+      commit: __APP_COMMIT__,
+      buildTime: __BUILD_TIME__,
       userAgent: navigator.userAgent,
       entries,
     };
