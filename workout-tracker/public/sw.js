@@ -101,12 +101,16 @@ function showTimerNotification() {
   const firedAt = Date.now();
   const expected = scheduledEndTime;
   const lateBy = expected !== null ? firedAt - expected : null;
-  swLog('info', 'sw: notification fired', `firedAt=${firedAt} expectedEndTime=${expected} lateByMs=${lateBy}`);
+  swLog('info', 'sw: notification fired', `firedAt=${firedAt} expectedEndTime=${expected} lateByMs=${lateBy} permission=${self.Notification ? self.Notification.permission : 'unsupported'}`);
   self.registration.showNotification('Rest Timer Complete', {
     body: 'Time for your next set!',
     icon: './icons/icon-192.png',
     tag: 'rest-timer',
     requireInteraction: false,
+  }).then(() => {
+    swLog('info', 'sw: showNotification resolved');
+  }).catch((err) => {
+    swLog('error', 'sw: showNotification rejected', err && err.message ? err.message : String(err));
   });
   broadcastNotificationShown(firedAt, expected);
 }
@@ -157,6 +161,11 @@ self.addEventListener('message', (event) => {
 
 // Handle notification click — focus the app
 self.addEventListener('notificationclick', (event) => {
+  swLog(
+    'info',
+    'sw: notificationclick',
+    `tag=${event.notification && event.notification.tag} action=${event.action || ''}`,
+  );
   event.notification.close();
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {

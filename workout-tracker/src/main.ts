@@ -26,7 +26,13 @@ registerRoute('settings', () => renderSettings(app));
 async function init() {
   await seedDefaults();
   await pruneOldLogs();
-  await log('info', 'app started', `commit=${__APP_COMMIT__} buildTime=${__BUILD_TIME__}`);
+  const notifPermission = 'Notification' in window ? Notification.permission : 'unsupported';
+  const swController = 'serviceWorker' in navigator && !!navigator.serviceWorker.controller;
+  await log(
+    'info',
+    'app started',
+    `commit=${__APP_COMMIT__} buildTime=${__BUILD_TIME__} notificationPermission=${notifPermission} swController=${swController}`,
+  );
   startRouter();
 }
 

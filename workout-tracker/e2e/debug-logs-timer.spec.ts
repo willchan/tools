@@ -70,4 +70,19 @@ test.describe('Timer Diagnostic Logging', () => {
     expect(entry).toBeDefined();
     expect(entry?.context).toMatch(/lateByMs/);
   });
+
+  test('logs notification permission and SW controller status on start', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { clearLogs } = await import('/src/logic/logger.ts');
+      await clearLogs();
+    });
+    await page.reload();
+    await page.waitForSelector('#start-workout-btn');
+
+    const logs = await readLogs(page);
+    const entry = logs.find((l) => l.message === 'app started');
+    expect(entry).toBeDefined();
+    expect(entry?.context).toMatch(/notificationPermission=/);
+    expect(entry?.context).toMatch(/swController=/);
+  });
 });
