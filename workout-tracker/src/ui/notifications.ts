@@ -8,10 +8,37 @@ function postToSW(message: Record<string, unknown>): void {
 
 export function scheduleBackgroundTimerNotification(expectedEndTime: number): void {
   postToSW({ type: 'TIMER_START', expectedEndTime });
+  const delayMs = expectedEndTime - Date.now();
+  void log(
+    'info',
+    'rest timer scheduled',
+    `expectedEndTime=${expectedEndTime} delayMs=${delayMs} swControlled=${!!('serviceWorker' in navigator && navigator.serviceWorker.controller)}`,
+  );
 }
 
 export function cancelBackgroundTimerNotification(): void {
   postToSW({ type: 'TIMER_CANCEL' });
+}
+
+/**
+ * Listen for the SW broadcast when it actually fires the rest-timer
+ * notification, and log the latency vs the original expected time. Useful
+ * for diagnosing iOS PWA cases where the SW is suspended in the background.
+ */
+export function installSwTimerLogging(): void {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || data.type !== 'TIMER_NOTIFICATION_SHOWN') return;
+    const firedAt = typeof data.firedAt === 'number' ? data.firedAt : Date.now();
+    const expectedEndTime = typeof data.expectedEndTime === 'number' ? data.expectedEndTime : null;
+    const lateByMs = expectedEndTime !== null ? firedAt - expectedEndTime : null;
+    void log(
+      'info',
+      'rest timer notification shown',
+      `firedAt=${firedAt} expectedEndTime=${expectedEndTime} lateByMs=${lateByMs}`,
+    );
+  });
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {

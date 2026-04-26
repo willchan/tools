@@ -5,6 +5,34 @@ const PRECACHE_URLS = [
   './manifest.json',
 ];
 
+// --- Diagnostic logging ---
+// The SW writes directly to the same IndexedDB 'logs' store the page uses so
+// timer events are captured even if the page is suspended. Opens without a
+// version so we never trigger an upgrade from this side; if the store doesn't
+// exist yet (very first load) the put call simply errors and we ignore it.
+function swLog(level, message, context) {
+  try {
+    const req = indexedDB.open('workout-tracker');
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        if (!db.objectStoreNames.contains('logs')) { db.close(); return; }
+        const tx = db.transaction('logs', 'readwrite');
+        const entry = { timestamp: Date.now(), level, message };
+        if (context !== undefined) entry.context = String(context);
+        tx.objectStore('logs').add(entry);
+        tx.oncomplete = () => db.close();
+        tx.onerror = () => db.close();
+      } catch (_e) {
+        db.close();
+      }
+    };
+    req.onerror = () => {};
+  } catch (_e) {
+    // SW logging must never throw into the calling event handler.
+  }
+}
+
 // Install: precache app shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -59,10 +87,10 @@ let backgroundTimerTimeout = null;
 let scheduledEndTime = null;
 let firedForEndTime = null;
 
-function broadcastNotificationShown() {
+function broadcastNotificationShown(firedAt, expectedEndTime) {
   self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
     for (const client of clients) {
-      client.postMessage({ type: 'TIMER_NOTIFICATION_SHOWN' });
+      client.postMessage({ type: 'TIMER_NOTIFICATION_SHOWN', firedAt, expectedEndTime });
     }
   });
 }
@@ -70,13 +98,17 @@ function broadcastNotificationShown() {
 function showTimerNotification() {
   if (scheduledEndTime !== null && firedForEndTime === scheduledEndTime) return;
   firedForEndTime = scheduledEndTime;
+  const firedAt = Date.now();
+  const expected = scheduledEndTime;
+  const lateBy = expected !== null ? firedAt - expected : null;
+  swLog('info', 'sw: notification fired', `firedAt=${firedAt} expectedEndTime=${expected} lateByMs=${lateBy}`);
   self.registration.showNotification('Rest Timer Complete', {
     body: 'Time for your next set!',
     icon: './icons/icon-192.png',
     tag: 'rest-timer',
     requireInteraction: false,
   });
-  broadcastNotificationShown();
+  broadcastNotificationShown(firedAt, expected);
 }
 
 // Handle timer notification messages from the app
@@ -84,6 +116,7 @@ self.addEventListener('message', (event) => {
   if (!event.data) return;
 
   if (event.data.type === 'TIMER_DONE') {
+    swLog('info', 'sw: TIMER_DONE received');
     showTimerNotification();
   }
 
@@ -96,6 +129,11 @@ self.addEventListener('message', (event) => {
     scheduledEndTime = event.data.expectedEndTime;
     firedForEndTime = null;
     const delayMs = event.data.expectedEndTime - Date.now();
+    swLog(
+      'info',
+      'sw: timer scheduled',
+      `expectedEndTime=${scheduledEndTime} delayMs=${delayMs}`,
+    );
     if (delayMs <= 0) {
       showTimerNotification();
     } else {
@@ -107,6 +145,7 @@ self.addEventListener('message', (event) => {
   }
 
   if (event.data.type === 'TIMER_CANCEL') {
+    swLog('info', 'sw: timer cancelled');
     if (backgroundTimerTimeout !== null) {
       clearTimeout(backgroundTimerTimeout);
       backgroundTimerTimeout = null;

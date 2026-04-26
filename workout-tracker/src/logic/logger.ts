@@ -71,6 +71,7 @@ export function installGlobalErrorHandlers(): void {
   });
 
   document.addEventListener('visibilitychange', () => {
+    void log('info', `visibility: ${document.visibilityState}`).catch(() => {});
     if (document.visibilityState === 'visible') {
       void pruneOldLogs().catch(() => {});
     }

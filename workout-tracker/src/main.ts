@@ -7,8 +7,10 @@ import { renderTemplates, renderTemplateEdit } from './ui/templates';
 import { renderHistory } from './ui/history';
 import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
+import { installSwTimerLogging } from './ui/notifications';
 
 installGlobalErrorHandlers();
+installSwTimerLogging();
 
 const app = document.getElementById('app')!;
 
