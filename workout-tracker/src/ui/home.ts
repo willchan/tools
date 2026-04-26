@@ -1,6 +1,7 @@
 import { getState, getAllTemplates, getAllTrainingMaxes, putState, getSettings, putSettings, getAllHistory } from '../db/database';
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
+import { decorateSettingsNavBadge } from '../logic/logger';
 
 export async function renderHome(container: HTMLElement): Promise<void> {
   const state = await getState();
@@ -120,6 +121,7 @@ export async function renderHome(container: HTMLElement): Promise<void> {
   `;
   container.appendChild(main);
   container.appendChild(nav);
+  await decorateSettingsNavBadge(nav);
 
   // Event listeners
   const intersperseCheckbox = document.getElementById('intersperse-checkbox') as HTMLInputElement | null;

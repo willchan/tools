@@ -13,7 +13,14 @@ import {
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
 import { requestNotificationPermission } from './notifications';
-import { getAllLogs, clearLogs } from '../logic/logger';
+import {
+  getAllLogs,
+  clearLogs,
+  getNewErrorSummary,
+  markErrorsSeen,
+  decorateSettingsNavBadge,
+  log,
+} from '../logic/logger';
 
 export async function renderSettings(container: HTMLElement): Promise<void> {
   const tms = await getAllTrainingMaxes();
@@ -22,6 +29,9 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
   const templates = await getAllTemplates();
   const settings = await getSettings();
   const logs = await getAllLogs();
+  const newErrors = await getNewErrorSummary();
+  // Acknowledge as soon as the user opens Settings — they've now "seen" the alert.
+  await markErrorsSeen();
   const template = templates.find((t) => t.id === state?.templateId);
 
   container.innerHTML = '';
@@ -36,6 +46,26 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
 
   const main = document.createElement('main');
   main.className = 'settings-screen';
+
+  if (newErrors.count > 0) {
+    const banner = document.createElement('section');
+    banner.className = 'new-errors-banner';
+    banner.dataset.testid = 'new-errors-banner';
+    const items = newErrors.messages
+      .slice(0, 5)
+      .map((m) => `<li>${escapeHtml(m)}</li>`)
+      .join('');
+    const more = newErrors.messages.length > 5
+      ? `<p class="new-errors-more">…and ${newErrors.messages.length - 5} more</p>`
+      : '';
+    banner.innerHTML = `
+      <strong>${newErrors.count} new error${newErrors.count === 1 ? '' : 's'} since you last looked</strong>
+      <ul>${items}</ul>
+      ${more}
+      <p>Use <em>Export Logs</em> below to share with Claude.</p>
+    `;
+    main.appendChild(banner);
+  }
 
   // Training Maxes section
   const tmSection = document.createElement('section');
@@ -162,6 +192,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
 
   container.appendChild(main);
   container.appendChild(nav);
+  await decorateSettingsNavBadge(nav);
 
   // Event listeners
   document.getElementById('back-btn')?.addEventListener('click', () => navigate('home'));
@@ -212,6 +243,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     const granted = await requestNotificationPermission();
     const btn = document.getElementById('enable-notif-btn')!;
     btn.textContent = granted ? 'Notifications Enabled' : 'Permission Denied';
+    await log(granted ? 'info' : 'warn', `notification permission ${granted ? 'granted' : 'denied'}`);
   });
 
   document.getElementById('export-btn')?.addEventListener('click', async () => {
@@ -223,6 +255,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     a.download = `workout-data-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    await log('info', 'data exported');
   });
 
   document.getElementById('export-logs-btn')?.addEventListener('click', async () => {
@@ -257,6 +290,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     const text = await file.text();
     const data = JSON.parse(text);
     await importAll(data);
+    await log('info', 'data imported');
     navigate('home');
   });
 
@@ -266,4 +300,13 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
       if (route) navigate(route as Route);
     });
   });
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

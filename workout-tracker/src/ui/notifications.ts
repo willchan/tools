@@ -1,3 +1,5 @@
+import { log } from '../logic/logger';
+
 function postToSW(message: Record<string, unknown>): void {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage(message);
@@ -33,8 +35,11 @@ export function primeAudioContext(): void {
   try {
     if (!audioCtx) audioCtx = new Ctor();
     void audioCtx.resume();
-  } catch {
-    // AudioContext may not be available
+  } catch (err) {
+    void log(
+      'warn',
+      `audio context unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

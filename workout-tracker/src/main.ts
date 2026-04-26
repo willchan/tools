@@ -35,8 +35,11 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       await navigator.serviceWorker.register('./sw.js');
-    } catch {
-      // SW registration failed
+    } catch (err) {
+      await log(
+        'error',
+        `service worker registration failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   });
 }
