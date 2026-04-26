@@ -249,11 +249,49 @@ body {
   font-size: 0.75rem;
   font-family: var(--font);
   cursor: pointer;
+  position: relative;
 }
 
 .nav-btn.active {
   color: var(--color-primary);
   font-weight: 600;
+}
+
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 18%;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.new-errors-banner {
+  background: rgba(239, 83, 80, 0.12);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  color: var(--color-text);
+}
+
+.new-errors-banner ul {
+  margin: 8px 0 4px 18px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.new-errors-banner .new-errors-more {
+  margin: 4px 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
 }
 
 /* === Workout Screen === */

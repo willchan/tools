@@ -7,8 +7,10 @@ import { renderTemplates, renderTemplateEdit } from './ui/templates';
 import { renderHistory } from './ui/history';
 import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
+import { installSwTimerLogging } from './ui/notifications';
 
 installGlobalErrorHandlers();
+installSwTimerLogging();
 
 const app = document.getElementById('app')!;
 
@@ -24,7 +26,13 @@ registerRoute('settings', () => renderSettings(app));
 async function init() {
   await seedDefaults();
   await pruneOldLogs();
-  await log('info', 'app started');
+  const notifPermission = 'Notification' in window ? Notification.permission : 'unsupported';
+  const swController = 'serviceWorker' in navigator && !!navigator.serviceWorker.controller;
+  await log(
+    'info',
+    'app started',
+    `commit=${__APP_COMMIT__} buildTime=${__BUILD_TIME__} notificationPermission=${notifPermission} swController=${swController}`,
+  );
   startRouter();
 }
 
@@ -35,8 +43,11 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       await navigator.serviceWorker.register('./sw.js');
-    } catch {
-      // SW registration failed
+    } catch (err) {
+      await log(
+        'error',
+        `service worker registration failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   });
 }

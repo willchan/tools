@@ -1,6 +1,7 @@
 import { getAllHistory, putWorkoutLog, deleteWorkoutLog, getAllTemplates, getState } from '../db/database';
 import type { WorkoutLog } from '../db/types';
 import { navigate, type Route } from './router';
+import { decorateSettingsNavBadge } from '../logic/logger';
 
 export async function renderHistory(container: HTMLElement): Promise<void> {
   const history = (await getAllHistory()).toSorted((a, b) => b.completedAt - a.completedAt);
@@ -76,6 +77,7 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
 
   container.appendChild(main);
   container.appendChild(nav);
+  await decorateSettingsNavBadge(nav);
 
   // Event listeners
   document.getElementById('back-btn')?.addEventListener('click', () => navigate('home'));

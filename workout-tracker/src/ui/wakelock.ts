@@ -1,17 +1,21 @@
+import { log } from '../logic/logger';
+
 let wakeLock: WakeLockSentinel | null = null;
 let wakeLockActive = false;
 
 export async function requestWakeLock(): Promise<void> {
   wakeLockActive = true;
+  if (!('wakeLock' in navigator)) return;
   try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => {
-        wakeLock = null;
-      });
-    }
-  } catch {
-    // Wake Lock request failed (e.g., low battery, not supported)
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => {
+      wakeLock = null;
+    });
+  } catch (err) {
+    void log(
+      'warn',
+      `wake lock request failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

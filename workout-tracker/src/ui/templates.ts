@@ -1,6 +1,7 @@
 import { getAllTemplates, getAllExercises, putTemplate, deleteTemplate, getState, putState } from '../db/database';
 import type { Template, TemplateSet, TemplateDay, Exercise } from '../db/types';
 import { navigate, type Route } from './router';
+import { decorateSettingsNavBadge } from '../logic/logger';
 
 /**
  * Normalize day ordering across all weeks to match week 0's order.
@@ -191,6 +192,7 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
 
   container.appendChild(main);
   container.appendChild(nav);
+  await decorateSettingsNavBadge(nav);
 
   // Listeners
   document.getElementById('back-btn')?.addEventListener('click', () => navigate('home'));

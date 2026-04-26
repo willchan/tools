@@ -2,6 +2,7 @@ import { getDB } from '../db/database';
 import type { LogEntry } from '../db/types';
 
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const SEEN_KEY = 'logSeenAt';
 
 export type LogLevel = LogEntry['level'];
 
@@ -70,6 +71,7 @@ export function installGlobalErrorHandlers(): void {
   });
 
   document.addEventListener('visibilitychange', () => {
+    void log('info', `visibility: ${document.visibilityState}`).catch(() => {});
     if (document.visibilityState === 'visible') {
       void pruneOldLogs().catch(() => {});
     }
@@ -82,6 +84,55 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+export async function getLastSeenAt(): Promise<number> {
+  const db = await getDB();
+  return ((await db.get('state', SEEN_KEY)) as number | undefined) ?? 0;
+}
+
+export async function markErrorsSeen(now: number = Date.now()): Promise<void> {
+  const db = await getDB();
+  await db.put('state', now, SEEN_KEY);
+}
+
+/**
+ * Distinct error messages logged since {@link markErrorsSeen} was last called.
+ * Deduped by exact message text so a recurring error doesn't keep alerting.
+ */
+export async function getNewErrorSummary(): Promise<{ count: number; messages: string[] }> {
+  const [lastSeen, logs] = await Promise.all([getLastSeenAt(), getAllLogs()]);
+  const messages: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of logs) {
+    if (entry.level !== 'error') continue;
+    if (entry.timestamp <= lastSeen) continue;
+    if (seen.has(entry.message)) continue;
+    seen.add(entry.message);
+    messages.push(entry.message);
+  }
+  return { count: messages.length, messages };
+}
+
+/**
+ * Decorate a freshly-rendered bottom-nav with a count badge on the Settings
+ * button when there are unseen errors. Safe to call once per render.
+ */
+export async function decorateSettingsNavBadge(nav: HTMLElement): Promise<void> {
+  const btn = nav.querySelector('.nav-btn[data-route="settings"]');
+  if (!(btn instanceof HTMLElement)) return;
+  // Strip any pre-existing badge to keep this idempotent across re-renders.
+  btn.querySelector('[data-testid="nav-badge"]')?.remove();
+
+  const { count } = await getNewErrorSummary();
+  if (count <= 0) return;
+
+  const badge = document.createElement('span');
+  badge.className = 'nav-badge';
+  badge.dataset.testid = 'nav-badge';
+  badge.textContent = String(count);
+  btn.appendChild(badge);
+  btn.setAttribute('aria-label', `Settings (${count} new ${count === 1 ? 'error' : 'errors'})`);
 }
 
 /** Format logs as a single human-readable text block (handy for pasting into Claude). */

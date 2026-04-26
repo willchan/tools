@@ -18,6 +18,7 @@ import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
 import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification, primeAudioContext } from './notifications';
+import { log as logEvent } from '../logic/logger';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let isResting = false;
@@ -84,6 +85,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     await putTimerState(null);
     cancelBackgroundTimerNotification();
   }
+
+  await logEvent(
+    'info',
+    resumingActiveWorkout ? 'workout resumed' : 'workout started',
+    `${day.name} (cycle ${state.cycle}, week ${state.weekIndex + 1})`,
+  );
 
   container.innerHTML = '';
 
@@ -525,6 +532,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     await putActiveWorkout(null);
 
     const { mainFailed, bbbFailed } = detectFailures();
+    await logEvent(
+      'info',
+      'workout completed',
+      `${day!.name} — ${completedSets.length} sets; missed main=${mainFailed.length} bbb=${bbbFailed.length}`,
+    );
     if (mainFailed.length > 0 || bbbFailed.length > 0) {
       showFailureSheet(mainFailed, bbbFailed);
     } else {
@@ -567,6 +579,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       releaseWakeLock();
       if (timerInterval) clearInterval(timerInterval);
       cancelBackgroundTimerNotification();
+      await logEvent('info', 'workout abandoned', `${day!.name} after ${completedSets.length} sets`);
       navigate('home');
     });
 
