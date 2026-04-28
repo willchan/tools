@@ -21,8 +21,18 @@ export async function requestWakeLock(): Promise<void> {
 
 export function releaseWakeLock(): void {
   wakeLockActive = false;
-  wakeLock?.release();
+  const sentinel = wakeLock;
   wakeLock = null;
+  // iOS Safari has been observed to reject release() with AbortError when
+  // the system has already auto-released the sentinel (notably across
+  // visibility changes). Treat it as best-effort cleanup so a stray
+  // rejection doesn't surface as an unhandled rejection.
+  sentinel?.release().catch((err) => {
+    void log(
+      'warn',
+      `wake lock release failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
 }
 
 // Re-acquire wake lock when page becomes visible again
