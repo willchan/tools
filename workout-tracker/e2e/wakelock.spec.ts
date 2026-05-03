@@ -131,4 +131,67 @@ test.describe('Wake Lock', () => {
     const callsAfterBack = await page.evaluate(() => (window as any).__wakeLockCalls.length);
     expect(callsAfterBack).toBe(callsBeforeBack);
   });
+
+  test('release() rejection (e.g. AbortError on iOS) does not surface as unhandled rejection', async ({ page }) => {
+    // iOS Safari has been observed to reject WakeLockSentinel.release() with
+    // an AbortError when the system has already auto-released the sentinel
+    // (e.g., due to a visibility change). Our explicit release call must
+    // swallow that rejection so it doesn't pollute the error log.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'wakeLock', {
+        value: {
+          request: (_type: string) => {
+            const sentinel = {
+              type: 'screen' as const,
+              addEventListener() {},
+              removeEventListener() {},
+              release() {
+                return Promise.reject(
+                  new DOMException('The operation was aborted.', 'AbortError'),
+                );
+              },
+              onrelease: null,
+              dispatchEvent: () => true,
+            };
+            return Promise.resolve(sentinel);
+          },
+        },
+        configurable: true,
+      });
+
+      (window as any).__unhandled = [] as string[];
+      window.addEventListener('unhandledrejection', (e) => {
+        const reason = (e as PromiseRejectionEvent).reason;
+        (window as any).__unhandled.push(
+          reason && typeof reason === 'object' && 'name' in reason
+            ? String((reason as { name: unknown }).name)
+            : String(reason),
+        );
+      });
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Triggers releaseWakeLock(), which calls sentinel.release() — the
+    // mock above makes that promise reject with AbortError.
+    await page.click('#back-btn');
+    await page.waitForSelector('h1');
+
+    // Give the microtask queue a tick so any unhandled rejection would fire.
+    await page.waitForTimeout(100);
+
+    const unhandled = await page.evaluate(() => (window as any).__unhandled as string[]);
+    expect(unhandled).not.toContain('AbortError');
+
+    // And no AbortError should have been written to the persistent log either.
+    const errorLogs = await page.evaluate(async () => {
+      const { getAllLogs } = await import('/src/logic/logger.ts');
+      const logs = await getAllLogs();
+      return logs.filter((l) => l.level === 'error').map((l) => l.message);
+    });
+    expect(errorLogs.some((m) => m.includes('AbortError'))).toBe(false);
+  });
 });
