@@ -10,7 +10,8 @@ export interface AmrapResult {
 /**
  * For each main lift, find the latest AMRAP set across the cycle's history
  * and report whether the prescribed rep target was met. Lifts with no AMRAP
- * record default to a miss (hit=false, reps=0).
+ * record default to a hit — i.e. assume the user cleared the prescribed
+ * target, which is the typical case.
  */
 export function evaluateCycleAmraps(
   cycleHistory: WorkoutLog[],
@@ -29,7 +30,7 @@ export function evaluateCycleAmraps(
       }
     }
     if (latest === null) {
-      out[liftId] = { hit: false, actualReps: 0, prescribedReps: 0 };
+      out[liftId] = { hit: true, actualReps: 0, prescribedReps: 0 };
     } else {
       out[liftId] = {
         hit: latest.actualReps >= latest.prescribedReps,

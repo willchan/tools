@@ -157,7 +157,8 @@ test.describe('AMRAP-gated TM bumps', () => {
     expect(result.squat).toEqual({ hit: true, actualReps: 3, prescribedReps: 1 });
     expect(result.bench).toEqual({ hit: false, actualReps: 0, prescribedReps: 1 });
     expect(result.deadlift).toEqual({ hit: true, actualReps: 5, prescribedReps: 5 });
-    expect(result.ohp).toEqual({ hit: false, actualReps: 0, prescribedReps: 0 });
+    // No AMRAP record → default to hit (user generally hits prescribed).
+    expect(result.ohp).toEqual({ hit: true, actualReps: 0, prescribedReps: 0 });
   });
 
   test('buildTMAdjustments only applies bump when AMRAP was hit', async ({ page }) => {
