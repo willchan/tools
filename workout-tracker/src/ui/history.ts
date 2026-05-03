@@ -43,6 +43,8 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
       const date = new Date(log.completedAt);
       const duration = Math.round((log.completedAt - log.startedAt) / 60000);
 
+      const tmBlock = renderTMAdjustments(log);
+
       const card = document.createElement('div');
       card.className = 'history-card';
       card.dataset.logId = log.id;
@@ -54,6 +56,7 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
         <p class="history-meta">Cycle ${log.cycle} · Week ${log.weekIndex + 1} · ${duration} min</p>
         <p class="history-sets">${log.sets.length} sets completed</p>
         ${log.sets.filter((s) => s.isAmrap).map((s) => `<p class="history-amrap">AMRAP: ${s.exerciseId} — ${s.actualReps} reps @ ${s.weight} lbs</p>`).join('')}
+        ${tmBlock}
         <div style="display: flex; gap: 8px; margin-top: 8px;">
           <button class="btn btn-small btn-secondary edit-workout-btn" data-testid="edit-workout-btn" data-log-id="${log.id}">Edit</button>
           <button class="btn btn-small btn-danger delete-workout-btn" data-testid="delete-workout-btn" data-log-id="${log.id}">Delete</button>
@@ -115,6 +118,32 @@ export async function renderHistory(container: HTMLElement): Promise<void> {
       if (route) navigate(route as Route);
     });
   });
+}
+
+function renderTMAdjustments(log: WorkoutLog): string {
+  if (!log.tmAdjustments || log.tmAdjustments.length === 0) return '';
+  const rows = log.tmAdjustments
+    .map((a) => {
+      if (a.hitTarget) {
+        return `<li class="cycle-row bumped">
+          <span class="cycle-lift">${a.exerciseId}</span>
+          <span class="cycle-tm">${a.previousTrainingMax} → ${a.newTrainingMax}</span>
+          <span class="cycle-tag bumped">+${a.appliedIncrement}</span>
+        </li>`;
+      }
+      return `<li class="cycle-row held">
+        <span class="cycle-lift">${a.exerciseId}</span>
+        <span class="cycle-tm">${a.previousTrainingMax}</span>
+        <span class="cycle-tag held">held (${a.amrapReps}/${a.prescribedReps})</span>
+      </li>`;
+    })
+    .join('');
+  return `
+    <div class="tm-adjustments-banner" data-testid="tm-adjustments">
+      <p class="tm-adjustments-title">Cycle ${log.cycle} complete — training max update</p>
+      <ul class="cycle-list">${rows}</ul>
+    </div>
+  `;
 }
 
 async function renderEditForm(container: HTMLElement, main: HTMLElement, log: WorkoutLog): Promise<void> {

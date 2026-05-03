@@ -61,6 +61,18 @@ export interface CompletedSet {
   timestamp: number;
 }
 
+/** Recorded per main lift on the workout that closes a cycle. */
+export interface TMAdjustment {
+  exerciseId: string;
+  previousTrainingMax: number;
+  newTrainingMax: number;
+  /** 0 when AMRAP wasn't hit and TM was held. */
+  appliedIncrement: number;
+  hitTarget: boolean;
+  amrapReps: number;
+  prescribedReps: number;
+}
+
 export interface WorkoutLog {
   id: string;
   templateId: string;
@@ -71,6 +83,8 @@ export interface WorkoutLog {
   sets: CompletedSet[];
   startedAt: number;
   completedAt: number;
+  /** Present only on the workout that completed a cycle. */
+  tmAdjustments?: TMAdjustment[];
 }
 
 /** Timer state persisted for resilient rest timer. */

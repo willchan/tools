@@ -2,6 +2,7 @@ import {
   getState,
   getTemplate,
   getAllTrainingMaxes,
+  getAllHistory,
   putState,
   putWorkoutLog,
   putTrainingMax,
@@ -11,9 +12,9 @@ import {
   getActiveWorkout,
   putActiveWorkout,
 } from '../db/database';
-import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
+import type { CompletedSet, WorkoutLog, TemplateSet, TMAdjustment } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates } from '../logic/calculator';
-import { advanceState } from '../logic/progression';
+import { advanceState, evaluateCycleAmraps, buildTMAdjustments } from '../logic/progression';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -494,6 +495,54 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     });
   }
 
+  function showCycleCompleteSheet(
+    cycle: number,
+    adjustments: TMAdjustment[],
+    onDismiss: () => void,
+  ) {
+    const items = adjustments
+      .map((a) => {
+        if (a.hitTarget) {
+          return `<li class="cycle-row bumped">
+            <span class="cycle-lift">${a.exerciseId}</span>
+            <span class="cycle-tm">${a.previousTrainingMax} → ${a.newTrainingMax} lbs</span>
+            <span class="cycle-tag bumped">+${a.appliedIncrement}</span>
+          </li>`;
+        }
+        return `<li class="cycle-row held">
+          <span class="cycle-lift">${a.exerciseId}</span>
+          <span class="cycle-tm">${a.previousTrainingMax} lbs</span>
+          <span class="cycle-tag held">held (AMRAP ${a.amrapReps}/${a.prescribedReps})</span>
+        </li>`;
+      })
+      .join('');
+
+    const anyHeld = adjustments.some((a) => !a.hitTarget);
+    const note = anyHeld
+      ? 'Lifts marked "held" missed their AMRAP target — Wendler says hold the TM and try again next cycle.'
+      : 'All AMRAPs hit. Training maxes have been increased for the next cycle.';
+
+    const sheet = document.createElement('div');
+    sheet.className = 'failure-sheet';
+    sheet.id = 'cycle-complete-sheet';
+    sheet.dataset.testid = 'cycle-complete-sheet';
+    sheet.innerHTML = `
+      <div class="failure-sheet-card">
+        <h2>Cycle ${cycle} complete</h2>
+        <ul class="cycle-list">${items}</ul>
+        <p class="failure-advice">${note}</p>
+        <button id="cycle-complete-dismiss" data-testid="cycle-complete-dismiss" class="btn btn-primary btn-large">Continue</button>
+      </div>
+    `;
+
+    document.getElementById('app')?.appendChild(sheet);
+
+    document.getElementById('cycle-complete-dismiss')?.addEventListener('click', () => {
+      sheet.remove();
+      onDismiss();
+    });
+  }
+
   async function completeWorkout() {
     const log: WorkoutLog = {
       id: `workout-${Date.now()}`,
@@ -507,22 +556,37 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       completedAt: Date.now(),
     };
 
-    await putWorkoutLog(log);
-
     // Advance state
     const result = advanceState(state!, template!);
     await putState(result.newState);
 
-    // Apply TM bumps if new cycle started
+    // Cycle complete: gate TM bumps on AMRAP performance across the cycle.
+    let adjustments: TMAdjustment[] | null = null;
     if (result.tmBumps) {
-      for (const bump of result.tmBumps) {
-        const current = tmMap.get(bump.exerciseId) ?? 0;
-        await putTrainingMax({
-          exerciseId: bump.exerciseId,
-          weight: current + bump.increment,
-        });
+      const allHistory = await getAllHistory();
+      const cycleHistory = [
+        ...allHistory.filter(
+          (h) => h.templateId === state!.templateId && h.cycle === state!.cycle,
+        ),
+        log,
+      ];
+      const mainLiftIds = result.tmBumps.map((b) => b.exerciseId);
+      const amrapResults = evaluateCycleAmraps(cycleHistory, mainLiftIds);
+      adjustments = buildTMAdjustments(result.tmBumps, amrapResults, tmMap);
+
+      for (const adj of adjustments) {
+        if (adj.appliedIncrement > 0) {
+          await putTrainingMax({
+            exerciseId: adj.exerciseId,
+            weight: adj.newTrainingMax,
+          });
+        }
       }
+
+      log.tmAdjustments = adjustments;
     }
+
+    await putWorkoutLog(log);
 
     // Cleanup
     releaseWakeLock();
@@ -532,15 +596,26 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     await putActiveWorkout(null);
 
     const { mainFailed, bbbFailed } = detectFailures();
+    const bumpedCount = adjustments?.filter((a) => a.hitTarget).length ?? 0;
+    const heldCount = adjustments?.filter((a) => !a.hitTarget).length ?? 0;
     await logEvent(
       'info',
       'workout completed',
-      `${day!.name} — ${completedSets.length} sets; missed main=${mainFailed.length} bbb=${bbbFailed.length}`,
+      `${day!.name} — ${completedSets.length} sets; missed main=${mainFailed.length} bbb=${bbbFailed.length}; tm bumped=${bumpedCount} held=${heldCount}`,
     );
-    if (mainFailed.length > 0 || bbbFailed.length > 0) {
-      showFailureSheet(mainFailed, bbbFailed);
+
+    const showFailures = () => {
+      if (mainFailed.length > 0 || bbbFailed.length > 0) {
+        showFailureSheet(mainFailed, bbbFailed);
+      } else {
+        navigate('home');
+      }
+    };
+
+    if (adjustments && adjustments.length > 0) {
+      showCycleCompleteSheet(state!.cycle, adjustments, showFailures);
     } else {
-      navigate('home');
+      showFailures();
     }
   }
 

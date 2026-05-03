@@ -844,6 +844,71 @@ body {
   margin-top: 4px;
 }
 
+/* TM bump banner on history cards + cycle-complete sheet */
+.tm-adjustments-banner {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 107, 79, 0.08);
+  border: 1px solid rgba(255, 107, 79, 0.25);
+}
+
+.tm-adjustments-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.cycle-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+}
+
+.cycle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cycle-lift {
+  flex: 0 0 auto;
+  text-transform: capitalize;
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.cycle-tm {
+  flex: 1;
+  color: var(--color-text-muted);
+}
+
+.cycle-tag {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.cycle-tag.bumped {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--color-success);
+}
+
+.cycle-tag.held {
+  background: rgba(136, 136, 136, 0.18);
+  color: var(--color-text-muted);
+}
+
 /* === Settings Screen === */
 .settings-screen {
   flex: 1;
