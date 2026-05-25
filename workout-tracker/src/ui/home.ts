@@ -53,6 +53,34 @@ export async function renderHome(container: HTMLElement): Promise<void> {
       // All days in this week are done — fall through and show the week as complete.
     }
 
+    // Snap-back: state points to a week the user couldn't have reached through
+    // normal progression — an earlier week in the same cycle has no history at
+    // all (a true gap, not just an incomplete week). Recovers from stale state
+    // left by manual overrides or prior bugs. Only fires when state's own week
+    // is empty AND the cycle has some progress recorded; that way we don't
+    // disturb fresh cycles where the user is intentionally browsing weeks via
+    // the picker.
+    if (week && completedDayIndices.size === 0 && state.weekIndex > 0) {
+      const weeksWithHistory = new Set(
+        history
+          .filter((log) => log.templateId === state.templateId && log.cycle === state.cycle)
+          .map((log) => log.weekIndex)
+      );
+      if (weeksWithHistory.size > 0) {
+        let firstEmptyEarlierWeek = -1;
+        for (let wi = 0; wi < state.weekIndex; wi++) {
+          if (!weeksWithHistory.has(wi)) {
+            firstEmptyEarlierWeek = wi;
+            break;
+          }
+        }
+        if (firstEmptyEarlierWeek >= 0) {
+          await putState({ ...state, weekIndex: firstEmptyEarlierWeek, dayIndex: 0 });
+          return renderHome(container);
+        }
+      }
+    }
+
     const allDaysComplete = week ? week.days.every((_, i) => completedDayIndices.has(i)) : false;
 
     const dayPickerButtons = week?.days.map((d, i) => {
