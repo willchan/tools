@@ -17,6 +17,8 @@ export interface TemplateSet {
   reps: number;
   /** Whether this is an AMRAP (As Many Reps As Possible) set. */
   isAmrap: boolean;
+  /** True for runtime-added bonus sets that compensate for missed volume reps. */
+  isBonus?: boolean;
 }
 
 export interface TemplateDay {
@@ -94,6 +96,8 @@ export interface ActiveWorkout {
   completedSets: CompletedSet[];
   currentSetIndex: number;
   startedAt: number;
+  /** Effective set sequence (intersperse applied, any bonus sets included). */
+  workoutSets?: TemplateSet[];
 }
 
 /** A persistent log entry kept for diagnostic exports. */

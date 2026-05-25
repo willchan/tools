@@ -14,6 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -47,8 +48,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     return;
   }
 
+  // Volume rep-total targets are derived from the template (not from
+  // the runtime sequence) so they stay fixed even as bonus sets are added.
+  const volumeGroups = computeVolumeGroups(day.sets);
+
   // Optionally intersperse accessories between primary sets
-  const workoutSets: TemplateSet[] = settings.intersperseAccessories
+  let workoutSets: TemplateSet[] = settings.intersperseAccessories
     ? intersperseSets(day.sets)
     : [...day.sets];
 
@@ -75,6 +80,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     completedSets.push(...activeWorkout.completedSets);
     currentSetIndex = activeWorkout.currentSetIndex;
     workoutStartTime = activeWorkout.startedAt;
+    // Restore the effective sequence (including any bonus sets that were
+    // appended for volume deficits) so the indexing into completedSets
+    // stays consistent across reloads.
+    if (activeWorkout.workoutSets && activeWorkout.workoutSets.length > 0) {
+      workoutSets = activeWorkout.workoutSets;
+    }
     resumingActiveWorkout = true;
   }
 
@@ -143,11 +154,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       const completed = completedSets[idx];
 
       const setEl = document.createElement('div');
-      setEl.className = `set-item ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''}`;
+      setEl.className = `set-item ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''} ${set.isBonus ? 'bonus' : ''}`;
       setEl.dataset.testid = `set-${idx}`;
+      if (set.isBonus) setEl.dataset.bonus = 'true';
 
       let repsDisplay = `${set.reps} reps`;
       if (set.isAmrap) repsDisplay += '+';
+      if (set.isBonus) repsDisplay += ' (bonus)';
 
       const weightDisplay = weight > 0 ? `${weight} lbs` : 'BW / Custom';
       let plateDisplay = '';
@@ -301,6 +314,30 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const justCompletedSet = set;
     currentSetIndex++;
 
+    // If the completed set was in a volume group and the cumulative reps
+    // still fall short of the target, append a bonus set at the original
+    // per-set reps so the user can grind out the remaining volume.
+    const groupKey = getVolumeGroupKey(justCompletedSet);
+    if (groupKey) {
+      const decision = evaluateBonusSetNeed(
+        groupKey,
+        workoutSets,
+        completedSets.map((s) => s.actualReps),
+        currentSetIndex,
+        volumeGroups,
+      );
+      if (decision.shouldAdd) {
+        workoutSets.splice(currentSetIndex, 0, {
+          exerciseId: justCompletedSet.exerciseId,
+          tmPercentage: justCompletedSet.tmPercentage,
+          tmLiftId: justCompletedSet.tmLiftId,
+          reps: decision.prescribedReps,
+          isAmrap: false,
+          isBonus: true,
+        });
+      }
+    }
+
     // Persist in-progress state to IndexedDB
     await putActiveWorkout({
       templateId: state!.templateId,
@@ -310,6 +347,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       completedSets: [...completedSets],
       currentSetIndex,
       startedAt: workoutStartTime,
+      workoutSets: [...workoutSets],
     });
 
     // Rest timer logic
@@ -432,28 +470,47 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   function detectFailures() {
     const mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
-    const bbbFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
+    const bbbFailed: Array<{ exerciseId: string; got: number; target: number }> = [];
 
+    // Main 5/3/1 sets are evaluated per-set (TM is the feedback loop).
     workoutSets.forEach((set, i) => {
       const completed = completedSets[i];
-      // AMRAP sets can't "fail" — any rep count is valid
       if (!completed || set.isAmrap) return;
       if (completed.actualReps >= set.reps) return;
       if (set.tmPercentage === null) return;
-
-      if (set.tmPercentage > 0.5) {
-        mainFailed.push({ exerciseId: set.exerciseId, got: completed.actualReps, prescribed: set.reps });
-      } else {
-        bbbFailed.push({ exerciseId: set.exerciseId, got: completed.actualReps, prescribed: set.reps });
-      }
+      if (set.tmPercentage <= 0.5) return;
+      mainFailed.push({ exerciseId: set.exerciseId, got: completed.actualReps, prescribed: set.reps });
     });
+
+    // BBB volume groups are evaluated against the group's TOTAL rep target.
+    // Bonus sets are already factored in via cumulative actualReps, so a
+    // user who grinds out 50 reps across 7 sets reads as a success.
+    type GroupTotal = { exerciseId: string; cumulative: number; target: number };
+    const groupTotals = new Map<string, GroupTotal>();
+    for (const [groupKey, group] of volumeGroups) {
+      const firstSet = workoutSets.find((s) => getVolumeGroupKey(s) === groupKey);
+      if (!firstSet || firstSet.tmPercentage === null) continue;
+      groupTotals.set(groupKey, { exerciseId: firstSet.exerciseId, cumulative: 0, target: group.target });
+    }
+    workoutSets.forEach((s, i) => {
+      const k = getVolumeGroupKey(s);
+      if (k === null) return;
+      const g = groupTotals.get(k);
+      if (!g) return;
+      g.cumulative += completedSets[i]?.actualReps ?? 0;
+    });
+    for (const g of groupTotals.values()) {
+      if (g.cumulative < g.target) {
+        bbbFailed.push({ exerciseId: g.exerciseId, got: g.cumulative, target: g.target });
+      }
+    }
 
     return { mainFailed, bbbFailed };
   }
 
   function showFailureSheet(
     mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }>,
-    bbbFailed: Array<{ exerciseId: string; got: number; prescribed: number }>,
+    bbbFailed: Array<{ exerciseId: string; got: number; target: number }>,
   ) {
     const hasMainFailure = mainFailed.length > 0;
 
@@ -462,7 +519,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         (f) => `<li>${f.exerciseId}: ${f.got}/${f.prescribed} reps (main set)</li>`,
       ),
       ...bbbFailed.map(
-        (f) => `<li>${f.exerciseId}: ${f.got}/${f.prescribed} reps (5×10)</li>`,
+        (f) => `<li>${f.exerciseId}: ${f.got}/${f.target} reps (volume target)</li>`,
       ),
     ].join('');
 

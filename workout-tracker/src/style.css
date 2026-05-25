@@ -375,6 +375,10 @@ body {
   border-color: var(--color-success);
 }
 
+.set-item.bonus {
+  border-left: 3px solid var(--color-primary);
+}
+
 .set-info {
   display: flex;
   flex-wrap: wrap;
