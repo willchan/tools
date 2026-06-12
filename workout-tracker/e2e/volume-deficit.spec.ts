@@ -143,6 +143,49 @@ test.describe('Volume deficit — unit logic', () => {
     expect(decision.shouldAdd).toBe(false);
   });
 
+  test('pickBonusInsertIndex inserts at currentSetIndex when intersperse is off', async ({ page }) => {
+    const idx = await page.evaluate(async () => {
+      const { pickBonusInsertIndex } = await import('/src/logic/volume.ts');
+      const sets = [
+        { exerciseId: 'a', tmPercentage: 0.5, tmLiftId: 'a', reps: 10, isAmrap: false },
+        { exerciseId: 'a', tmPercentage: 0.5, tmLiftId: 'a', reps: 10, isAmrap: false },
+        { exerciseId: 'b', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+      ];
+      const bonus = { exerciseId: 'a', tmPercentage: 0.5, tmLiftId: 'a', reps: 10, isAmrap: false };
+      return pickBonusInsertIndex(bonus, sets, 2, false);
+    });
+    expect(idx).toBe(2);
+  });
+
+  test('pickBonusInsertIndex skips past next opposite-type set when intersperse is on', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { pickBonusInsertIndex } = await import('/src/logic/volume.ts');
+      // Interspersed sequence: P A P A P A — accessory bonus after current
+      // index 5 (just finished an A) should slot after the next P (idx 6).
+      const sets = [
+        { exerciseId: 'main', tmPercentage: 0.65, tmLiftId: 'm', reps: 5, isAmrap: false },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'main', tmPercentage: 0.75, tmLiftId: 'm', reps: 5, isAmrap: false },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'main', tmPercentage: 0.85, tmLiftId: 'm', reps: 5, isAmrap: true },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'bbb', tmPercentage: 0.5, tmLiftId: 'm', reps: 10, isAmrap: false },
+        { exerciseId: 'dip', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'bbb', tmPercentage: 0.5, tmLiftId: 'm', reps: 10, isAmrap: false },
+      ];
+      const accessoryBonus = { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false };
+      const primaryBonus = { exerciseId: 'bbb', tmPercentage: 0.5, tmLiftId: 'm', reps: 10, isAmrap: false };
+      return {
+        accessoryFromSix: pickBonusInsertIndex(accessoryBonus, sets, 6, true), // next P at 6 → insert at 7
+        primaryFromSeven: pickBonusInsertIndex(primaryBonus, sets, 7, true),   // next A at 7 → insert at 8
+        noOppositeAhead: pickBonusInsertIndex(primaryBonus, sets, 8, true),    // only primary at 8 → append at 9
+      };
+    });
+    expect(result.accessoryFromSix).toBe(7);
+    expect(result.primaryFromSeven).toBe(8);
+    expect(result.noOppositeAhead).toBe(9);
+  });
+
   test('evaluateBonusSetNeed stops once bonus cap (2× original count) is reached', async ({ page }) => {
     const decision = await page.evaluate(async () => {
       const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
@@ -286,6 +329,37 @@ test.describe('Volume deficit — workout flow', () => {
     await expect(page.locator('#failure-sheet')).toBeVisible();
     await expect(page.locator('.failure-list')).toContainText('0/50');
     await expect(page.locator('.failure-list')).toContainText('volume target');
+  });
+
+  test('bonus accessory set lands between primary sets in intersperse mode', async ({ page }) => {
+    // Override default and enable intersperse before starting.
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Squat day interspersed layout (indices 0..13):
+    //   0:main 1:lc 2:main 3:lc 4:main(amrap) 5:lc 6:BBB 7:hlr 8:BBB 9:hlr 10:BBB 11:hlr 12:BBB 13:BBB
+    // Drain all three leg-curl sets at 0 reps so lc3 triggers a bonus,
+    // completing each primary in between at full prescribed reps.
+    await completeSet(page);              // main 1
+    await logSetWithReps(page, 0, 10);    // lc 1 short
+    await completeSet(page);              // main 2
+    await logSetWithReps(page, 0, 10);    // lc 2 short
+    await completeSet(page);              // main 3 (amrap)
+    await logSetWithReps(page, 0, 10);    // lc 3 short → bonus_lc
+
+    // Next set should be a squat (BBB), NOT another leg-curl: bonus is
+    // queued behind the next primary instead of stacked back-to-back.
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('.set-exercise')).toContainText('squat');
+    await expect(current).not.toHaveAttribute('data-bonus', 'true');
+
+    // The bonus leg-curl should be the set immediately AFTER this one.
+    const nextAfterCurrent = page.locator('[data-testid="set-7"]');
+    await expect(nextAfterCurrent.locator('.set-exercise')).toContainText('leg-curl');
+    await expect(nextAfterCurrent).toHaveAttribute('data-bonus', 'true');
   });
 
   test('bonus sets persist across a reload', async ({ page }) => {

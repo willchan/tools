@@ -14,7 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey } from '../logic/volume';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, pickBonusInsertIndex } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -327,14 +327,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         volumeGroups,
       );
       if (decision.shouldAdd) {
-        workoutSets.splice(currentSetIndex, 0, {
+        const bonusSet: TemplateSet = {
           exerciseId: justCompletedSet.exerciseId,
           tmPercentage: justCompletedSet.tmPercentage,
           tmLiftId: justCompletedSet.tmLiftId,
           reps: decision.prescribedReps,
           isAmrap: false,
           isBonus: true,
-        });
+        };
+        const insertAt = pickBonusInsertIndex(
+          bonusSet,
+          workoutSets,
+          currentSetIndex,
+          settings.intersperseAccessories,
+        );
+        workoutSets.splice(insertAt, 0, bonusSet);
       }
     }
 

@@ -83,3 +83,30 @@ export function evaluateBonusSetNeed(
   if (totalInGroup >= maxTotal) return { shouldAdd: false, prescribedReps: group.repsPerSet };
   return { shouldAdd: true, prescribedReps: group.repsPerSet };
 }
+
+/**
+ * Choose where to splice a bonus set into the workout sequence.
+ *
+ * In non-intersperse mode we insert immediately at `currentSetIndex` so
+ * the bonus follows the same-exercise group it belongs to.
+ *
+ * In intersperse mode we preserve the alternating primary/accessory
+ * cadence: skip ahead to the next set of the OPPOSITE type and insert
+ * after it. If none remain ahead, append at the end.
+ */
+export function pickBonusInsertIndex(
+  bonusSet: TemplateSet,
+  workoutSets: TemplateSet[],
+  currentSetIndex: number,
+  intersperseMode: boolean,
+): number {
+  if (!intersperseMode) return currentSetIndex;
+  const isBonusPrimary = bonusSet.tmPercentage !== null;
+  for (let i = currentSetIndex; i < workoutSets.length; i++) {
+    const isOpposite = isBonusPrimary
+      ? workoutSets[i].tmPercentage === null
+      : workoutSets[i].tmPercentage !== null;
+    if (isOpposite) return i + 1;
+  }
+  return workoutSets.length;
+}
