@@ -53,6 +53,11 @@ export interface BonusSetDecision {
  *   2. The cumulative actual reps still fall short of the group target.
  *   3. We haven't hit the bonus cap (originalCount more bonus sets — i.e.,
  *      the group can at most double in size).
+ *
+ * The bonus prescription is sized to the remaining deficit so the user
+ * isn't asked to do extra reps once the volume target is in reach,
+ * capped at the group's per-set prescription so a single bonus never
+ * exceeds what was originally configured.
  */
 export function evaluateBonusSetNeed(
   groupKey: string,
@@ -81,7 +86,8 @@ export function evaluateBonusSetNeed(
   if (cumulative >= group.target) return { shouldAdd: false, prescribedReps: group.repsPerSet };
   const maxTotal = group.originalCount * 2;
   if (totalInGroup >= maxTotal) return { shouldAdd: false, prescribedReps: group.repsPerSet };
-  return { shouldAdd: true, prescribedReps: group.repsPerSet };
+  const remainingDeficit = group.target - cumulative;
+  return { shouldAdd: true, prescribedReps: Math.min(group.repsPerSet, remainingDeficit) };
 }
 
 /**

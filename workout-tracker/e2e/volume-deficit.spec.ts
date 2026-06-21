@@ -30,16 +30,15 @@ async function completeSet(page: import('@playwright/test').Page) {
   await skipRestIfShown(page);
 }
 
-async function logSetWithReps(
-  page: import('@playwright/test').Page,
-  reps: number,
-  prescribed: number,
-) {
-  if (reps < prescribed) {
-    await page.click(MISSED_TOGGLE);
-    for (let i = 0; i < prescribed - reps; i++) {
-      await page.click(STEPPER_DEC);
-    }
+async function logSetWithReps(page: import('@playwright/test').Page, reps: number) {
+  const text = (await page.locator('.set-item.current .set-prescription').textContent()) ?? '';
+  const prescribed = parseInt(text.match(/(\d+)\s*reps/)?.[1] ?? '0', 10);
+  if (reps !== prescribed) {
+    const stepperVisible = await page.locator(STEPPER_VALUE).isVisible().catch(() => false);
+    if (!stepperVisible) await page.click(MISSED_TOGGLE);
+    const diff = prescribed - reps;
+    const button = diff > 0 ? STEPPER_DEC : '[data-testid="stepper-inc"]';
+    for (let i = 0; i < Math.abs(diff); i++) await page.click(button);
     await expect(page.locator(STEPPER_VALUE)).toHaveText(String(reps));
   }
   await page.click(DONE);
@@ -114,7 +113,7 @@ test.describe('Volume deficit — unit logic', () => {
     expect(decision.shouldAdd).toBe(false);
   });
 
-  test('evaluateBonusSetNeed adds when last scheduled set leaves deficit', async ({ page }) => {
+  test('evaluateBonusSetNeed sizes bonus to remaining deficit (5 not 10)', async ({ page }) => {
     const decision = await page.evaluate(async () => {
       const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
       const sets = [
@@ -123,7 +122,24 @@ test.describe('Volume deficit — unit logic', () => {
         { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
       ];
       const groups = computeVolumeGroups(sets);
+      // 10 + 10 + 5 = 25, target 30 → only 5 more needed.
       return evaluateBonusSetNeed('pullup|null|10', sets, [10, 10, 5], 3, groups);
+    });
+    expect(decision.shouldAdd).toBe(true);
+    expect(decision.prescribedReps).toBe(5);
+  });
+
+  test('evaluateBonusSetNeed caps bonus at the group per-set prescription when deficit is large', async ({ page }) => {
+    const decision = await page.evaluate(async () => {
+      const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
+      const sets = [
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+      ];
+      const groups = computeVolumeGroups(sets);
+      // 0 + 0 + 0 = 0, target 30, deficit 30 — bonus is capped at 10.
+      return evaluateBonusSetNeed('pullup|null|10', sets, [0, 0, 0], 3, groups);
     });
     expect(decision.shouldAdd).toBe(true);
     expect(decision.prescribedReps).toBe(10);
@@ -225,24 +241,24 @@ test.describe('Volume deficit — workout flow', () => {
   test('missing reps mid-BBB does not immediately add a bonus set', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1: log 6/10
-    await logSetWithReps(page, 6, 10);
+    await logSetWithReps(page, 6);
     // Next set is BBB 2 (squat, prescribed 10 — no bump)
     await expect(page.locator('.set-item.current .set-exercise')).toContainText('squat');
     await expect(page.locator('.set-item.current .set-prescription')).toContainText('10 reps');
     await expect(page.locator('.set-item')).toHaveCount(14);
   });
 
-  test('missing reps in the last BBB set adds a bonus set at original reps', async ({ page }) => {
+  test('missing reps in the last BBB set adds a bonus sized to the remaining deficit', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1-4 at full
     for (let i = 0; i < 4; i++) await completeSet(page);
-    // BBB 5: log 6/10. Total = 46 < 50.
-    await logSetWithReps(page, 6, 10);
+    // BBB 5: log 6/10. Total = 46, target = 50, deficit = 4.
+    await logSetWithReps(page, 6);
 
-    // A bonus BBB squat set should be the new current set.
+    // Bonus appears, sized to the remaining 4 reps — not the original 10.
     const current = page.locator('.set-item.current');
     await expect(current.locator('.set-exercise')).toContainText('squat');
-    await expect(current.locator('.set-prescription')).toContainText('10');
+    await expect(current.locator('.set-prescription')).toContainText('4 reps');
     await expect(current.locator('.set-prescription')).toContainText('bonus');
     // One bonus set added — total grew from 14 to 15.
     await expect(page.locator('.set-item')).toHaveCount(15);
@@ -251,7 +267,7 @@ test.describe('Volume deficit — workout flow', () => {
   test('bonus sets keep getting appended until BBB total is reached', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1-4 at 0 reps each. Total = 0.
-    for (let i = 0; i < 4; i++) await logSetWithReps(page, 0, 10);
+    for (let i = 0; i < 4; i++) await logSetWithReps(page, 0);
     // BBB 5 at 10 reps. Total = 10. Bonus 1 appears.
     await completeSet(page);
 
@@ -274,24 +290,22 @@ test.describe('Volume deficit — workout flow', () => {
     await completeSet(page);
     await completeSet(page);
     // Leg-curl set 3: log 5/10. Total = 25 < 30.
-    await logSetWithReps(page, 5, 10);
+    await logSetWithReps(page, 5);
 
     const current = page.locator('.set-item.current');
     await expect(current.locator('.set-exercise')).toContainText('leg-curl');
     await expect(current.locator('.set-prescription')).toContainText('bonus');
   });
 
-  test('bonus reps match the group prescription, not a hardcoded 10 (hanging-leg-raise → 15)', async ({ page }) => {
+  test('bonus per-set cap matches the group prescription (hanging-leg-raise → 15, not 10)', async ({ page }) => {
     await completeMainSets(page);
     // 5 BBB squat at full
     for (let i = 0; i < 5; i++) await completeSet(page);
     // 3 leg-curl at full
     for (let i = 0; i < 3; i++) await completeSet(page);
-    // hanging-leg-raise 1 & 2 at full (15 each)
-    await completeSet(page);
-    await completeSet(page);
-    // hanging-leg-raise 3: log 10/15 (deficit 5, total 40 < 45) → bonus appears
-    await logSetWithReps(page, 10, 15);
+    // All three hanging-leg-raise sets at 0 reps. Cumulative 0, target 45,
+    // deficit 45 — bonus prescription is capped at the group's 15.
+    for (let i = 0; i < 3; i++) await logSetWithReps(page, 0);
 
     const current = page.locator('.set-item.current');
     await expect(current.locator('.set-exercise')).toContainText('hanging-leg-raise');
@@ -304,7 +318,7 @@ test.describe('Volume deficit — workout flow', () => {
 
   test('missing reps on a main 5/3/1 set does not append a bonus set', async ({ page }) => {
     // First main set: prescribed 5, log 3.
-    await logSetWithReps(page, 3, 5);
+    await logSetWithReps(page, 3);
 
     // Next current set is main set 2 (squat 75%), not a bonus. Total set count unchanged.
     const current = page.locator('.set-item.current');
@@ -317,9 +331,9 @@ test.describe('Volume deficit — workout flow', () => {
     await completeMainSets(page);
     // BBB 1-4 at full, BBB 5 short (6/10) → bonus appears
     for (let i = 0; i < 4; i++) await completeSet(page);
-    await logSetWithReps(page, 6, 10);
+    await logSetWithReps(page, 6);
     // Bonus: do 4 reps. Total = 50.
-    await logSetWithReps(page, 4, 10);
+    await logSetWithReps(page, 4);
     // Continue accessories at full
     for (let i = 0; i < 6; i++) await completeSet(page);
 
@@ -331,13 +345,13 @@ test.describe('Volume deficit — workout flow', () => {
   test('bonus sets stop once 2× original count is hit; remaining deficit shows on failure sheet', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1-4 at 0 reps each (4 sets, 0 total)
-    for (let i = 0; i < 4; i++) await logSetWithReps(page, 0, 10);
+    for (let i = 0; i < 4; i++) await logSetWithReps(page, 0);
     // BBB 5: 0 reps. Total = 0. Add bonus 1.
-    await logSetWithReps(page, 0, 10);
+    await logSetWithReps(page, 0);
     // Bonus 1-5: 0 reps each. After bonus 5, total sets = 10 (5 original + 5 bonus) = 2× cap → no more bonus.
     for (let i = 0; i < 5; i++) {
       await expect(page.locator('.set-item.current')).toHaveAttribute('data-bonus', 'true');
-      await logSetWithReps(page, 0, 10);
+      await logSetWithReps(page, 0);
     }
     // Next set should be the first accessory (leg-curl), not another bonus.
     await expect(page.locator('.set-item.current .set-exercise')).toContainText('leg-curl');
@@ -365,11 +379,11 @@ test.describe('Volume deficit — workout flow', () => {
     // Drain all three leg-curl sets at 0 reps so lc3 triggers a bonus,
     // completing each primary in between at full prescribed reps.
     await completeSet(page);              // main 1
-    await logSetWithReps(page, 0, 10);    // lc 1 short
+    await logSetWithReps(page, 0);    // lc 1 short
     await completeSet(page);              // main 2
-    await logSetWithReps(page, 0, 10);    // lc 2 short
+    await logSetWithReps(page, 0);    // lc 2 short
     await completeSet(page);              // main 3 (amrap)
-    await logSetWithReps(page, 0, 10);    // lc 3 short → bonus_lc
+    await logSetWithReps(page, 0);    // lc 3 short → bonus_lc
 
     // Next set should be a squat (BBB), NOT another leg-curl: bonus is
     // queued behind the next primary instead of stacked back-to-back.
@@ -386,7 +400,7 @@ test.describe('Volume deficit — workout flow', () => {
   test('bonus sets persist across a reload', async ({ page }) => {
     await completeMainSets(page);
     for (let i = 0; i < 4; i++) await completeSet(page);
-    await logSetWithReps(page, 6, 10);
+    await logSetWithReps(page, 6);
 
     // Bonus set is currently visible.
     await expect(page.locator('.set-item.current')).toHaveAttribute('data-bonus', 'true');
