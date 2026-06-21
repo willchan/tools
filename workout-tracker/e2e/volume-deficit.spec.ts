@@ -281,6 +281,27 @@ test.describe('Volume deficit — workout flow', () => {
     await expect(current.locator('.set-prescription')).toContainText('bonus');
   });
 
+  test('bonus reps match the group prescription, not a hardcoded 10 (hanging-leg-raise → 15)', async ({ page }) => {
+    await completeMainSets(page);
+    // 5 BBB squat at full
+    for (let i = 0; i < 5; i++) await completeSet(page);
+    // 3 leg-curl at full
+    for (let i = 0; i < 3; i++) await completeSet(page);
+    // hanging-leg-raise 1 & 2 at full (15 each)
+    await completeSet(page);
+    await completeSet(page);
+    // hanging-leg-raise 3: log 10/15 (deficit 5, total 40 < 45) → bonus appears
+    await logSetWithReps(page, 10, 15);
+
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('.set-exercise')).toContainText('hanging-leg-raise');
+    await expect(current.locator('.set-prescription')).toContainText('15 reps');
+    await expect(current.locator('.set-prescription')).toContainText('bonus');
+    // Stepper should default to 15 for this group, not 10.
+    await page.click(MISSED_TOGGLE);
+    await expect(page.locator(STEPPER_VALUE)).toHaveText('15');
+  });
+
   test('missing reps on a main 5/3/1 set does not append a bonus set', async ({ page }) => {
     // First main set: prescribed 5, log 3.
     await logSetWithReps(page, 3, 5);
