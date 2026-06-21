@@ -61,13 +61,28 @@ export function primeAudioContext(): void {
   if (!Ctor) return;
   try {
     if (!audioCtx) audioCtx = new Ctor();
-    void audioCtx.resume();
+    resumeAudioContext(audioCtx);
   } catch (err) {
     void log(
       'warn',
       `audio context unavailable: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+}
+
+// AudioContext.resume() returns a promise that rejects on iOS WebKit when the
+// audio session is interrupted — e.g. resuming from a long background — with
+// "Failed to start the audio device". The surrounding try/catch can't catch an
+// async rejection, so handle it here. The OS notification + vibration still
+// alert the user, so a silent beep is acceptable; we just log it as a warning
+// instead of letting it surface as an unhandled rejection.
+function resumeAudioContext(ctx: AudioContext): void {
+  void ctx.resume().catch((err: unknown) => {
+    void log(
+      'warn',
+      `audio resume failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
 }
 
 function playBeepPattern(): void {
@@ -78,7 +93,7 @@ function playBeepPattern(): void {
   }
   if (!audioCtx) return;
   const ctx = audioCtx;
-  void ctx.resume();
+  resumeAudioContext(ctx);
   const beepCount = 3;
   const beepDuration = 0.2;
   const gapDuration = 0.15;
