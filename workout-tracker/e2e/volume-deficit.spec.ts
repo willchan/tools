@@ -143,6 +143,47 @@ test.describe('Volume deficit — unit logic', () => {
     expect(decision.shouldAdd).toBe(false);
   });
 
+  test('computeBonusInsertionIndex places accessory bonus after the next primary set', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { computeBonusInsertionIndex } = await import('/src/logic/volume.ts');
+      // P0 A0 P1 A1 P2 ... — just completed A0 (index 1), currentSetIndex is 2 (P1).
+      const sets = [
+        { exerciseId: 'squat', tmPercentage: 0.65, tmLiftId: 'squat', reps: 5, isAmrap: false },
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'squat', tmPercentage: 0.75, tmLiftId: 'squat', reps: 5, isAmrap: false },
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+      ];
+      return computeBonusInsertionIndex(sets, 2, true);
+    });
+    // Should land after P1 (index 2), i.e. index 3 — not immediately at index 2.
+    expect(result).toBe(3);
+  });
+
+  test('computeBonusInsertionIndex falls back to immediate insertion when no primary set remains', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { computeBonusInsertionIndex } = await import('/src/logic/volume.ts');
+      const sets = [
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+      ];
+      return computeBonusInsertionIndex(sets, 1, true);
+    });
+    expect(result).toBe(1);
+  });
+
+  test('computeBonusInsertionIndex is a no-op for non-accessory (BBB/main) bonus sets', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { computeBonusInsertionIndex } = await import('/src/logic/volume.ts');
+      const sets = [
+        { exerciseId: 'squat', tmPercentage: 0.5, tmLiftId: 'squat', reps: 10, isAmrap: false },
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'squat', tmPercentage: 0.5, tmLiftId: 'squat', reps: 10, isAmrap: false },
+      ];
+      return computeBonusInsertionIndex(sets, 1, false);
+    });
+    expect(result).toBe(1);
+  });
+
   test('evaluateBonusSetNeed stops once bonus cap (2× original count) is reached', async ({ page }) => {
     const decision = await page.evaluate(async () => {
       const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
