@@ -407,6 +407,12 @@ body {
   color: var(--color-text-muted);
 }
 
+.set-deficit {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  width: 100%;
+}
+
 .set-actions {
   display: flex;
   flex-direction: column;
