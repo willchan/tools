@@ -12,7 +12,7 @@ import {
   putActiveWorkout,
 } from '../db/database';
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
-import { calculateWorkingWeight, calculatePlates, formatPlates } from '../logic/calculator';
+import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
 import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
@@ -475,9 +475,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const bbbFailed: Array<{ exerciseId: string; got: number; target: number }> = [];
 
     // Main 5/3/1 sets are evaluated per-set (TM is the feedback loop).
+    // AMRAP sets have no upper cap, but missing the prescribed minimum
+    // still counts as a failure per Wendler's rules.
     workoutSets.forEach((set, i) => {
       const completed = completedSets[i];
-      if (!completed || set.isAmrap) return;
+      if (!completed) return;
       if (completed.actualReps >= set.reps) return;
       if (set.tmPercentage === null) return;
       if (set.tmPercentage <= 0.5) return;
@@ -537,7 +539,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         <h2>Missed reps</h2>
         <ul class="failure-list">${items}</ul>
         <p class="failure-advice">${advice}</p>
-        ${hasMainFailure ? `<button id="failure-review-btn" class="btn btn-primary btn-large">Review Training Maxes →</button>` : ''}
+        ${hasMainFailure ? `<button id="failure-reset-tm-btn" class="btn btn-primary btn-large">Reset Training Max</button>` : ''}
         <button id="failure-skip-btn" class="btn btn-text">Skip for now</button>
       </div>
     `;
@@ -548,7 +550,18 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       navigate('home');
     });
 
-    document.getElementById('failure-review-btn')?.addEventListener('click', () => {
+    document.getElementById('failure-reset-tm-btn')?.addEventListener('click', async () => {
+      const failedExerciseIds = new Set(mainFailed.map((f) => f.exerciseId));
+      for (const exerciseId of failedExerciseIds) {
+        const currentTM = tmMap.get(exerciseId);
+        if (currentTM === undefined) continue;
+        await putTrainingMax({ exerciseId, weight: calculateResetTM(currentTM) });
+      }
+      await logEvent(
+        'info',
+        'training max reset',
+        `Dropped TM 10% for ${[...failedExerciseIds].join(', ')} after missed reps`,
+      );
       navigate('settings');
     });
   }
