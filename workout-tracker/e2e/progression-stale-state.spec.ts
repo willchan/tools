@@ -12,7 +12,8 @@ import { test, expect } from '@playwright/test';
  */
 test('home self-heals when state skips an empty earlier week in the cycle', async ({ page }) => {
   await page.goto('/');
-  await page.waitForSelector('#app');
+  // Wait for full app init (seedDefaults + render) before touching IndexedDB
+  await page.waitForSelector('#start-workout-btn');
 
   await page.evaluate(async () => {
     const { importAll } = await import('/src/db/database.ts');

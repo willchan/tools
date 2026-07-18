@@ -222,37 +222,48 @@ export async function importAll(data: AppData): Promise<void> {
 }
 
 // --- Seed defaults if empty ---
+// Runs as a single readwrite transaction so a concurrently-created importAll()
+// transaction (e.g. a test seeding IndexedDB right after page load) can't
+// interleave with this "read empty -> write defaults" check-then-act and get
+// clobbered by it — same-scope IndexedDB transactions run in creation order,
+// so whichever transaction is created first now fully completes before the
+// other's operations execute.
 export async function seedDefaults(): Promise<void> {
-  const exercises = await getAllExercises();
+  const db = await getDB();
+  const tx = db.transaction(['exercises', 'templates', 'state', 'trainingMaxes'], 'readwrite');
+  const exercisesStore = tx.objectStore('exercises');
+  const templatesStore = tx.objectStore('templates');
+  const stateStore = tx.objectStore('state');
+  const trainingMaxesStore = tx.objectStore('trainingMaxes');
+
+  const [exercises, templates] = await Promise.all([exercisesStore.getAll(), templatesStore.getAll()]);
+
   const defaults = getDefaultExercises();
   if (exercises.length === 0) {
-    for (const e of defaults) await putExercise(e);
+    for (const e of defaults) await exercisesStore.put(e);
   } else {
     // Add any missing default exercises (e.g. newly added exercises like Dragon Flag)
     const existingIds = new Set(exercises.map((e) => e.id));
     for (const e of defaults) {
-      if (!existingIds.has(e.id)) await putExercise(e);
+      if (!existingIds.has(e.id)) await exercisesStore.put(e);
     }
   }
 
-  const templates = await getAllTemplates();
   if (templates.length === 0) {
     const tmpl = getDefault531Template();
-    await putTemplate(tmpl);
+    await templatesStore.put(tmpl);
 
     // Set default state
-    const state = await getState();
+    const state = await stateStore.get('current');
     if (!state) {
-      await putState({
-        templateId: tmpl.id,
-        cycle: 1,
-        weekIndex: 0,
-        dayIndex: 0,
-      });
+      await stateStore.put(
+        { templateId: tmpl.id, cycle: 1, weekIndex: 0, dayIndex: 0 },
+        'current'
+      );
     }
 
     // Set default training maxes for the 4 main lifts
-    const tms = await getAllTrainingMaxes();
+    const tms = await trainingMaxesStore.getAll();
     if (tms.length === 0) {
       const defaultTMs: TrainingMax[] = [
         { exerciseId: 'squat', weight: 225 },
@@ -260,7 +271,9 @@ export async function seedDefaults(): Promise<void> {
         { exerciseId: 'deadlift', weight: 275 },
         { exerciseId: 'ohp', weight: 115 },
       ];
-      for (const tm of defaultTMs) await putTrainingMax(tm);
+      for (const tm of defaultTMs) await trainingMaxesStore.put(tm);
     }
   }
+
+  await tx.done;
 }
