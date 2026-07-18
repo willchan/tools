@@ -184,6 +184,21 @@ test.describe('Volume deficit — unit logic', () => {
     expect(result).toBe(1);
   });
 
+  test('computeVolumeProgress reports cumulative reps and target for a group', async ({ page }) => {
+    const progress = await page.evaluate(async () => {
+      const { computeVolumeProgress, computeVolumeGroups } = await import('/src/logic/volume.ts');
+      const sets = [
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'leg-curl', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+      ];
+      const groups = computeVolumeGroups(sets);
+      // Sets 0 and 1 done (10 + 10), set 2 not yet done — progress as of index 2.
+      return computeVolumeProgress('leg-curl|null|10', sets, [10, 10], 2, groups);
+    });
+    expect(progress).toEqual({ cumulative: 20, target: 30 });
+  });
+
   test('evaluateBonusSetNeed stops once bonus cap (2× original count) is reached', async ({ page }) => {
     const decision = await page.evaluate(async () => {
       const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
@@ -277,6 +292,21 @@ test.describe('Volume deficit — workout flow', () => {
     const current = page.locator('.set-item.current');
     await expect(current.locator('.set-exercise')).toContainText('leg-curl');
     await expect(current.locator('.set-prescription')).toContainText('bonus');
+  });
+
+  test('accessory bonus set shows the running deficit toward the volume target', async ({ page }) => {
+    await completeMainSets(page);
+    // 5 BBB at full
+    for (let i = 0; i < 5; i++) await completeSet(page);
+    // Leg-curl set 1 & 2 at full (10/10)
+    await completeSet(page);
+    await completeSet(page);
+    // Leg-curl set 3: log 5/10. Total = 25 < 30. Bonus set appears.
+    await logSetWithReps(page, 5, 10);
+
+    const deficit = page.locator('.set-item.current [data-testid="set-deficit"]');
+    await expect(deficit).toContainText('25/30');
+    await expect(deficit).toContainText('5 to go');
   });
 
   test('missing reps on a main 5/3/1 set does not append a bonus set', async ({ page }) => {

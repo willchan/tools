@@ -84,6 +84,34 @@ export function evaluateBonusSetNeed(
   return { shouldAdd: true, prescribedReps: group.repsPerSet };
 }
 
+export interface VolumeProgress {
+  cumulative: number;
+  target: number;
+}
+
+/**
+ * Cumulative reps completed so far in a volume group, alongside its total
+ * target. Used to show the running deficit while grinding through bonus
+ * sets, since it's easy to lose track of how much volume is still owed.
+ */
+export function computeVolumeProgress(
+  groupKey: string,
+  workoutSets: TemplateSet[],
+  completedActualReps: number[],
+  uptoIndex: number,
+  volumeGroups: Map<string, VolumeGroup>,
+): VolumeProgress | null {
+  const group = volumeGroups.get(groupKey);
+  if (!group) return null;
+
+  let cumulative = 0;
+  for (let i = 0; i < uptoIndex; i++) {
+    if (getVolumeGroupKey(workoutSets[i]) !== groupKey) continue;
+    cumulative += completedActualReps[i] ?? 0;
+  }
+  return { cumulative, target: group.target };
+}
+
 /**
  * Where to splice a newly-decided bonus set into the runtime sequence.
  *

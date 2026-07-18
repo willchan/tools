@@ -14,7 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex } from '../logic/volume';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -162,6 +162,18 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (set.isAmrap) repsDisplay += '+';
       if (set.isBonus) repsDisplay += ' (bonus)';
 
+      let deficitDisplay = '';
+      if (set.isBonus && isCurrent) {
+        const groupKey = getVolumeGroupKey(set);
+        const progress = groupKey
+          ? computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups)
+          : null;
+        if (progress) {
+          const remaining = Math.max(0, progress.target - progress.cumulative);
+          deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
+        }
+      }
+
       const weightDisplay = weight > 0 ? `${weight} lbs` : 'BW / Custom';
       let plateDisplay = '';
       if (plates && plates.plates.length > 0) {
@@ -208,6 +220,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
               <span class="set-weight">${weightDisplay}</span>
               ${plateDisplay}
               <span class="set-prescription">${repsDisplay}</span>
+              ${deficitDisplay}
             </div>
             <div class="set-actions">
               <div class="reps-stepper hidden" data-testid="reps-stepper" data-max="${set.reps}">
