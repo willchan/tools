@@ -83,3 +83,26 @@ export function evaluateBonusSetNeed(
   if (totalInGroup >= maxTotal) return { shouldAdd: false, prescribedReps: group.repsPerSet };
   return { shouldAdd: true, prescribedReps: group.repsPerSet };
 }
+
+/**
+ * Where to splice a newly-decided bonus set into the runtime sequence.
+ *
+ * Inserting an accessory make-up set immediately at currentSetIndex puts it
+ * right after the set that just fell short, with no rest in between. When a
+ * primary set is still coming up, we instead insert the bonus after that
+ * primary set — its rest timer gives the user a chance to do the make-up
+ * set during a break they were already taking, instead of back-to-back.
+ * Non-accessory bonus sets (BBB) already get their own rest timer, so they
+ * insert at currentSetIndex unchanged. Same if no primary set remains ahead.
+ */
+export function computeBonusInsertionIndex(
+  workoutSets: TemplateSet[],
+  currentSetIndex: number,
+  isAccessory: boolean,
+): number {
+  if (!isAccessory) return currentSetIndex;
+  for (let i = currentSetIndex; i < workoutSets.length; i++) {
+    if (workoutSets[i].tmPercentage !== null) return i + 1;
+  }
+  return currentSetIndex;
+}

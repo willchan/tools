@@ -128,6 +128,65 @@ test.describe('Intersperse Accessories', () => {
     await expect(doneBtn).toBeDisabled();
   });
 
+  test('interspersed: accessory make-up set is inserted after the next primary set, not immediately', async ({ page }) => {
+    // With intersperse, sequence is: P0 A0(leg-curl1) P1 A1(leg-curl2) P2 A2(leg-curl3) P3 A3(hangleg1) ...
+    // Missing reps on leg-curl3 (the last scheduled leg-curl) triggers a bonus leg-curl set.
+    // It should land AFTER the next primary set (P3), not immediately before it —
+    // so the user gets to rest during P3 instead of grinding the make-up set back-to-back.
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    const DONE = '[data-testid="done-set-btn"]';
+    const SKIP_TIMER = '#skip-timer-btn';
+    const MISSED_TOGGLE = '[data-testid="missed-reps-toggle"]';
+    const STEPPER_DEC = '[data-testid="stepper-dec"]';
+
+    async function skipRestIfShown() {
+      try {
+        await page.locator(SKIP_TIMER).waitFor({ state: 'visible', timeout: 500 });
+        await page.click(SKIP_TIMER);
+      } catch {
+        /* no timer to skip */
+      }
+    }
+
+    // P0 (main squat set 1)
+    await page.click(DONE);
+    await skipRestIfShown();
+    // A0 (leg-curl 1) — full reps
+    await page.click(DONE);
+    // P1 (main squat set 2)
+    await page.click(DONE);
+    await skipRestIfShown();
+    // A1 (leg-curl 2) — full reps
+    await page.click(DONE);
+    // P2 (main squat set 3)
+    await page.click(DONE);
+    await skipRestIfShown();
+
+    // A2 (leg-curl 3) — miss reps to trigger a bonus set (total was 20/30, this brings it short of 30).
+    await page.click(MISSED_TOGGLE);
+    for (let i = 0; i < 5; i++) await page.click(STEPPER_DEC);
+    await page.click(DONE);
+
+    // Next set should be P3 (a BBB squat set), NOT the bonus leg-curl.
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('.set-exercise')).toContainText('squat');
+    await expect(current).not.toHaveAttribute('data-bonus', 'true');
+
+    // Complete P3 — rest timer starts.
+    await page.click(DONE);
+    await expect(page.locator('#rest-timer')).toBeVisible();
+
+    // The bonus leg-curl set should now be current, slotted in right after P3.
+    const afterP3 = page.locator('.set-item.current');
+    await expect(afterP3.locator('.set-exercise')).toContainText('leg-curl');
+    await expect(afterP3).toHaveAttribute('data-bonus', 'true');
+    // Done button should stay enabled so the user can do the make-up set during P3's rest.
+    await expect(page.locator(DONE)).toBeEnabled();
+  });
+
   test('interspersed: no new rest timer after completing accessory set', async ({ page }) => {
     await page.locator('[data-testid="intersperse-checkbox"]').check();
     await page.click('#start-workout-btn');
