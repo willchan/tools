@@ -75,3 +75,11 @@ export function getTMIncrement(exerciseId: string): number {
   const lowerBody = ['squat', 'deadlift', 'front-squat'];
   return lowerBody.includes(exerciseId) ? 10 : 5;
 }
+
+/**
+ * Calculate the reset Training Max after missing prescribed reps.
+ * Wendler's classic advice: drop the TM 10%, rounded to nearest 5 lbs.
+ */
+export function calculateResetTM(trainingMax: number): number {
+  return Math.round((trainingMax * 0.9) / 5) * 5;
+}

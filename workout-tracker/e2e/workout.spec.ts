@@ -234,7 +234,7 @@ test.describe('Workout Flow', () => {
     await expect(page.locator('h1')).toHaveText('Workout Tracker');
   });
 
-  test('failure sheet review TMs navigates to settings', async ({ page }) => {
+  test('failure sheet reset TM button drops training max 10% and navigates to settings', async ({ page }) => {
     await page.click('[data-testid="missed-reps-toggle"]');
     await page.click('[data-testid="stepper-dec"]');
     await page.click('[data-testid="done-set-btn"]');
@@ -242,8 +242,27 @@ test.describe('Workout Flow', () => {
     await page.click('#complete-workout-btn');
     await expect(page.locator('#failure-sheet')).toBeVisible();
 
-    await page.click('#failure-review-btn');
+    await page.click('#failure-reset-tm-btn');
     await expect(page.locator('h1')).toHaveText('Settings');
+    // Squat TM was 225; a 10% reset rounds to 205.
+    await expect(page.locator('[data-testid="tm-input-squat"]')).toHaveValue('205');
+  });
+
+  test('missing the AMRAP minimum reps also shows the failure sheet', async ({ page }) => {
+    // Reach the AMRAP set (3rd set)
+    await page.click('[data-testid="done-set-btn"]');
+    await page.click('#skip-timer-btn');
+    await page.click('[data-testid="done-set-btn"]');
+    await page.click('#skip-timer-btn');
+
+    // Week 1 AMRAP set: 5 prescribed reps. Drop below the minimum.
+    await page.click('[data-testid="stepper-dec"]'); // 5 → 4
+    await page.click('[data-testid="done-set-btn"]');
+
+    await completeRemainingSets(page, 3);
+    await page.click('#complete-workout-btn');
+    await expect(page.locator('#failure-sheet')).toBeVisible();
+    await expect(page.locator('.failure-list')).toContainText('squat: 4/5 reps (main set)');
   });
 
   test('back button returns to home', async ({ page }) => {
