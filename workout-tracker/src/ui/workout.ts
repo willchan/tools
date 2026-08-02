@@ -23,6 +23,11 @@ import { log as logEvent } from '../logic/logger';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let isResting = false;
+// Registered on `document`, which outlives any single renderWorkout() call,
+// so each render must tear down the previous instance's listener before
+// attaching its own — otherwise repeated workouts in one session would
+// stack handlers referencing stale, detached DOM.
+let removeVisibilityReconcileHandler: (() => void) | null = null;
 
 export async function renderWorkout(container: HTMLElement): Promise<void> {
   const state = await getState();
@@ -683,6 +688,34 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     cancelBackgroundTimerNotification();
     await putTimerState(null);
   });
+
+  // On iOS, backgrounding the app for long enough can freeze the main
+  // thread entirely — including the 250ms polling interval above — so a
+  // rest timer can expire while nothing on the page is running to notice.
+  // The service worker's own setTimeout still fires eventually, but only
+  // once iOS resumes the process, which can be minutes late. Reconcile
+  // immediately when the page becomes visible again instead of waiting for
+  // the polling interval to catch up.
+  if (removeVisibilityReconcileHandler) removeVisibilityReconcileHandler();
+  const onVisibilityReconcile = () => {
+    if (document.visibilityState !== 'visible') return;
+    void (async () => {
+      const saved = await getTimerState();
+      if (!saved || getRemainingMs(saved) > 0) return;
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      await putTimerState(null);
+      setDoneButtonDisabled(false);
+      cancelBackgroundTimerNotification();
+      fireTimerNotification();
+      showTimerExpired(timerEl);
+    })();
+  };
+  document.addEventListener('visibilitychange', onVisibilityReconcile);
+  removeVisibilityReconcileHandler = () =>
+    document.removeEventListener('visibilitychange', onVisibilityReconcile);
 
   // Check for existing timer (browser tab resumed after suspension)
   const existingTimer = await getTimerState();
