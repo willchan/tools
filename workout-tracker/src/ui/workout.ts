@@ -168,7 +168,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (set.isBonus) repsDisplay += ' (bonus)';
 
       let deficitDisplay = '';
-      if (set.isBonus && isCurrent) {
+      if (set.isBonus) {
         const groupKey = getVolumeGroupKey(set);
         const progress = groupKey
           ? computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups)
@@ -245,6 +245,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
             <span class="set-exercise">${set.exerciseId}</span>
             <span class="set-weight">${weightDisplay}</span>
             <span class="set-prescription">${repsDisplay}</span>
+            ${deficitDisplay}
           </div>
         `;
       }
