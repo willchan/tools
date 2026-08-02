@@ -187,6 +187,55 @@ test.describe('Intersperse Accessories', () => {
     await expect(page.locator(DONE)).toBeEnabled();
   });
 
+  test('interspersed: pending bonus set shows the running deficit while a primary set is active', async ({ page }) => {
+    // Same setup as above: A2 (leg-curl 3) falls short, queuing a bonus leg-curl
+    // set after P3. While P3 is current, the bonus set is only "pending" —
+    // but the user still needs to see how many reps are left so they know
+    // what's coming after the primary lift they're mid-way through.
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    const DONE = '[data-testid="done-set-btn"]';
+    const SKIP_TIMER = '#skip-timer-btn';
+    const MISSED_TOGGLE = '[data-testid="missed-reps-toggle"]';
+    const STEPPER_DEC = '[data-testid="stepper-dec"]';
+
+    async function skipRestIfShown() {
+      try {
+        await page.locator(SKIP_TIMER).waitFor({ state: 'visible', timeout: 500 });
+        await page.click(SKIP_TIMER);
+      } catch {
+        /* no timer to skip */
+      }
+    }
+
+    // P0, A0 (leg-curl 1 full), P1, A1 (leg-curl 2 full), P2
+    await page.click(DONE);
+    await skipRestIfShown();
+    await page.click(DONE);
+    await page.click(DONE);
+    await skipRestIfShown();
+    await page.click(DONE);
+    await page.click(DONE);
+    await skipRestIfShown();
+
+    // A2 (leg-curl 3) — miss reps: total 20/30, this brings it to 25/30. Bonus queued after P3.
+    await page.locator(MISSED_TOGGLE).click();
+    for (let i = 0; i < 5; i++) await page.click(STEPPER_DEC);
+    await page.click(DONE);
+
+    // P3 is now current; the bonus leg-curl set is pending (not yet current).
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('.set-exercise')).toContainText('squat');
+    const pendingBonus = page.locator('.set-item.bonus:not(.current)');
+    await expect(pendingBonus).toBeVisible();
+
+    const deficit = pendingBonus.locator('[data-testid="set-deficit"]');
+    await expect(deficit).toContainText('25/30');
+    await expect(deficit).toContainText('5 to go');
+  });
+
   test('interspersed: no new rest timer after completing accessory set', async ({ page }) => {
     await page.locator('[data-testid="intersperse-checkbox"]').check();
     await page.click('#start-workout-btn');
