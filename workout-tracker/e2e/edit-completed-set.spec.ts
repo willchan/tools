@@ -64,6 +64,11 @@ test.describe('Edit Completed Set Reps', () => {
     await completed.locator('[data-testid="edit-stepper-dec"]').click();
     await completed.locator('[data-testid="save-edit-btn"]').click();
 
+    // Saving is async (IndexedDB write); wait for the edit UI to close
+    // (which only happens after the save completes) before reloading, or
+    // the reload can race ahead of the persisted write.
+    await expect(completed.locator('[data-testid="edit-set-btn"]')).toBeVisible();
+
     await page.reload();
     await page.waitForSelector('.workout-screen');
 
