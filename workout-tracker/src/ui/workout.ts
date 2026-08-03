@@ -14,7 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress } from '../logic/volume';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -367,7 +367,14 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const valueEl = setsContainer.querySelector('[data-testid="edit-stepper-value"]') as HTMLElement | null;
     const newReps = parseInt(valueEl?.textContent || '', 10);
     if (!isNaN(newReps)) {
+      const editedSet = workoutSets[editingSetIndex];
       completedSets[editingSetIndex] = { ...completedSets[editingSetIndex], actualReps: newReps };
+
+      const groupKey = getVolumeGroupKey(editedSet);
+      if (groupKey) {
+        reconcileVolumeGroup(groupKey);
+      }
+
       await putActiveWorkout({
         templateId: state!.templateId,
         cycle: state!.cycle,
@@ -388,6 +395,42 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const tm = tmMap.get(set.tmLiftId);
     if (!tm) return 0;
     return calculateWorkingWeight(tm, set.tmPercentage);
+  }
+
+  /**
+   * Single chokepoint for keeping a volume group's bonus sets in sync with
+   * completedSets. Called both when a set is originally marked done and
+   * whenever a past set's reps are edited, so a correction can retroactively
+   * drop a now-unneeded pending bonus set or add one that a downward edit
+   * newly requires — instead of the decision only ever being made once.
+   */
+  function reconcileVolumeGroup(groupKey: string) {
+    const actualReps = completedSets.map((s) => s.actualReps);
+
+    const progress = computeVolumeProgress(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
+    if (progress && progress.cumulative >= progress.target) {
+      const removeIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
+      if (removeIndex !== null) {
+        workoutSets.splice(removeIndex, 1);
+        return;
+      }
+    }
+
+    const decision = evaluateBonusSetNeed(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
+    if (decision.shouldAdd) {
+      const groupSet = workoutSets.find((s) => getVolumeGroupKey(s) === groupKey);
+      if (!groupSet) return;
+      const isAccessory = groupSet.tmPercentage === null;
+      const insertIndex = computeBonusInsertionIndex(workoutSets, currentSetIndex, isAccessory);
+      workoutSets.splice(insertIndex, 0, {
+        exerciseId: groupSet.exerciseId,
+        tmPercentage: groupSet.tmPercentage,
+        tmLiftId: groupSet.tmLiftId,
+        reps: decision.prescribedReps,
+        isAmrap: false,
+        isBonus: true,
+      });
+    }
   }
 
   async function markSetDone() {
@@ -418,25 +461,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     // per-set reps so the user can grind out the remaining volume.
     const groupKey = getVolumeGroupKey(justCompletedSet);
     if (groupKey) {
-      const decision = evaluateBonusSetNeed(
-        groupKey,
-        workoutSets,
-        completedSets.map((s) => s.actualReps),
-        currentSetIndex,
-        volumeGroups,
-      );
-      if (decision.shouldAdd) {
-        const isAccessory = justCompletedSet.tmPercentage === null;
-        const insertIndex = computeBonusInsertionIndex(workoutSets, currentSetIndex, isAccessory);
-        workoutSets.splice(insertIndex, 0, {
-          exerciseId: justCompletedSet.exerciseId,
-          tmPercentage: justCompletedSet.tmPercentage,
-          tmLiftId: justCompletedSet.tmLiftId,
-          reps: decision.prescribedReps,
-          isAmrap: false,
-          isBonus: true,
-        });
-      }
+      reconcileVolumeGroup(groupKey);
     }
 
     // Persist in-progress state to IndexedDB

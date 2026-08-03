@@ -113,6 +113,24 @@ export function computeVolumeProgress(
 }
 
 /**
+ * Locate a not-yet-reached bonus set belonging to a volume group, so it can
+ * be dropped if an edit to an earlier set's reps closes the deficit that
+ * justified adding it. Only looks at index >= currentSetIndex — completed
+ * history is never touched.
+ */
+export function findRemovableBonusSetIndex(
+  groupKey: string,
+  workoutSets: TemplateSet[],
+  currentSetIndex: number,
+): number | null {
+  for (let i = currentSetIndex; i < workoutSets.length; i++) {
+    const set = workoutSets[i];
+    if (set.isBonus && getVolumeGroupKey(set) === groupKey) return i;
+  }
+  return null;
+}
+
+/**
  * Where to splice a newly-decided bonus set into the runtime sequence.
  *
  * Inserting an accessory make-up set immediately at currentSetIndex puts it
