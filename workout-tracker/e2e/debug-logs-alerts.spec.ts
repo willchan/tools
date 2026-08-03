@@ -148,11 +148,15 @@ test.describe('Swallowed-catch Logging', () => {
 
   test('wake lock failure logs a warning', async ({ page }) => {
     // Stub the wakeLock API to reject, then trigger a workout (which requests it).
+    // Plain assignment doesn't shadow WebKit's native wakeLock accessor, so use
+    // defineProperty like wakelock.spec.ts does.
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (navigator as any).wakeLock = {
-        request: () => Promise.reject(new Error('stubbed wakelock failure')),
-      };
+      Object.defineProperty(navigator, 'wakeLock', {
+        value: {
+          request: () => Promise.reject(new Error('stubbed wakelock failure')),
+        },
+        configurable: true,
+      });
     });
     await page.click('#start-workout-btn');
     await page.waitForSelector('.workout-screen');

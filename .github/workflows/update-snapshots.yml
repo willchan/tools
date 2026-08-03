@@ -22,7 +22,7 @@ jobs:
         run: bun install
 
       - name: Install Playwright browsers
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium webkit
 
       - name: Update snapshots
         run: bunx playwright test --update-snapshots --grep "visual snapshot"
