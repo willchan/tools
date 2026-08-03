@@ -14,7 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress } from '../logic/volume';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -68,6 +68,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   const completedSets: CompletedSet[] = [];
   let currentSetIndex = 0;
+  let editingSetIndex: number | null = null;
   let workoutStartTime = Date.now();
   let timerExpiredTimeout: ReturnType<typeof setTimeout> | null = null;
   let timerExpiredClickDismiss: (() => void) | null = null;
@@ -187,16 +188,37 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
       if (isCompleted && completed) {
         const missedReps = completed.actualReps < completed.prescribedReps;
-        setEl.innerHTML = `
-          <div class="set-info">
-            <span class="set-exercise">${set.exerciseId}</span>
-            <span class="set-weight">${weightDisplay}</span>
-            ${plateDisplay}
-          </div>
-          <div class="set-result">
-            <span class="set-reps-done ${missedReps ? 'missed' : ''}">${completed.actualReps} reps ✓</span>
-          </div>
-        `;
+        if (editingSetIndex === idx) {
+          setEl.innerHTML = `
+            <div class="set-info">
+              <span class="set-exercise">${set.exerciseId}</span>
+              <span class="set-weight">${weightDisplay}</span>
+              ${plateDisplay}
+            </div>
+            <div class="set-actions">
+              <div class="reps-stepper" data-testid="edit-reps-stepper" data-max="${set.isAmrap ? 999 : set.reps}">
+                <span class="stepper-label">Reps:</span>
+                <button class="stepper-btn" data-testid="edit-stepper-dec" aria-label="Fewer reps">−</button>
+                <span class="stepper-value" data-testid="edit-stepper-value">${completed.actualReps}</span>
+                <button class="stepper-btn" data-testid="edit-stepper-inc" aria-label="More reps">+</button>
+              </div>
+              <button class="btn btn-primary save-edit-btn" data-testid="save-edit-btn">Save</button>
+              <button class="btn btn-text cancel-edit-btn" data-testid="cancel-edit-btn">Cancel</button>
+            </div>
+          `;
+        } else {
+          setEl.innerHTML = `
+            <div class="set-info">
+              <span class="set-exercise">${set.exerciseId}</span>
+              <span class="set-weight">${weightDisplay}</span>
+              ${plateDisplay}
+            </div>
+            <div class="set-result">
+              <span class="set-reps-done ${missedReps ? 'missed' : ''}">${completed.actualReps} reps ✓</span>
+              <button class="btn btn-small edit-set-btn" data-testid="edit-set-btn" data-set-idx="${idx}">Edit</button>
+            </div>
+          `;
+        }
       } else if (isCurrent) {
         if (set.isAmrap) {
           // AMRAP: stepper always visible, no toggle needed, no upper cap
@@ -301,6 +323,72 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       const current = parseInt(valueEl.textContent || '0', 10);
       if (current < max) valueEl.textContent = String(current + 1);
     });
+
+    // Editing a completed set's recorded reps
+    setsContainer.querySelectorAll('[data-testid="edit-set-btn"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt((btn as HTMLElement).dataset.setIdx || '-1', 10);
+        editingSetIndex = idx;
+        renderSets();
+      });
+    });
+
+    const editDecBtn = setsContainer.querySelector('[data-testid="edit-stepper-dec"]') as HTMLButtonElement | null;
+    editDecBtn?.addEventListener('click', () => {
+      const valueEl = setsContainer.querySelector('[data-testid="edit-stepper-value"]') as HTMLElement | null;
+      if (!valueEl) return;
+      const current = parseInt(valueEl.textContent || '0', 10);
+      if (current > 0) valueEl.textContent = String(current - 1);
+    });
+
+    const editIncBtn = setsContainer.querySelector('[data-testid="edit-stepper-inc"]') as HTMLButtonElement | null;
+    editIncBtn?.addEventListener('click', () => {
+      const stepperEl = setsContainer.querySelector('[data-testid="edit-reps-stepper"]') as HTMLElement | null;
+      const valueEl = setsContainer.querySelector('[data-testid="edit-stepper-value"]') as HTMLElement | null;
+      if (!stepperEl || !valueEl) return;
+      const max = parseInt(stepperEl.dataset.max || '999', 10);
+      const current = parseInt(valueEl.textContent || '0', 10);
+      if (current < max) valueEl.textContent = String(current + 1);
+    });
+
+    const saveEditBtn = setsContainer.querySelector('[data-testid="save-edit-btn"]') as HTMLButtonElement | null;
+    saveEditBtn?.addEventListener('click', () => {
+      void saveEditedSet();
+    });
+
+    const cancelEditBtn = setsContainer.querySelector('[data-testid="cancel-edit-btn"]') as HTMLButtonElement | null;
+    cancelEditBtn?.addEventListener('click', () => {
+      editingSetIndex = null;
+      renderSets();
+    });
+  }
+
+  async function saveEditedSet() {
+    if (editingSetIndex === null) return;
+    const valueEl = setsContainer.querySelector('[data-testid="edit-stepper-value"]') as HTMLElement | null;
+    const newReps = parseInt(valueEl?.textContent || '', 10);
+    if (!isNaN(newReps)) {
+      const editedSet = workoutSets[editingSetIndex];
+      completedSets[editingSetIndex] = { ...completedSets[editingSetIndex], actualReps: newReps };
+
+      const groupKey = getVolumeGroupKey(editedSet);
+      if (groupKey) {
+        reconcileVolumeGroup(groupKey);
+      }
+
+      await putActiveWorkout({
+        templateId: state!.templateId,
+        cycle: state!.cycle,
+        weekIndex: state!.weekIndex,
+        dayIndex: state!.dayIndex,
+        completedSets: [...completedSets],
+        currentSetIndex,
+        startedAt: workoutStartTime,
+        workoutSets: [...workoutSets],
+      });
+    }
+    editingSetIndex = null;
+    renderSets();
   }
 
   function getSetWeight(set: TemplateSet, tmMap: Map<string, number>): number {
@@ -308,6 +396,42 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const tm = tmMap.get(set.tmLiftId);
     if (!tm) return 0;
     return calculateWorkingWeight(tm, set.tmPercentage);
+  }
+
+  /**
+   * Single chokepoint for keeping a volume group's bonus sets in sync with
+   * completedSets. Called both when a set is originally marked done and
+   * whenever a past set's reps are edited, so a correction can retroactively
+   * drop a now-unneeded pending bonus set or add one that a downward edit
+   * newly requires — instead of the decision only ever being made once.
+   */
+  function reconcileVolumeGroup(groupKey: string) {
+    const actualReps = completedSets.map((s) => s.actualReps);
+
+    const progress = computeVolumeProgress(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
+    if (progress && progress.cumulative >= progress.target) {
+      const removeIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
+      if (removeIndex !== null) {
+        workoutSets.splice(removeIndex, 1);
+        return;
+      }
+    }
+
+    const decision = evaluateBonusSetNeed(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
+    if (decision.shouldAdd) {
+      const groupSet = workoutSets.find((s) => getVolumeGroupKey(s) === groupKey);
+      if (!groupSet) return;
+      const isAccessory = groupSet.tmPercentage === null;
+      const insertIndex = computeBonusInsertionIndex(workoutSets, currentSetIndex, isAccessory);
+      workoutSets.splice(insertIndex, 0, {
+        exerciseId: groupSet.exerciseId,
+        tmPercentage: groupSet.tmPercentage,
+        tmLiftId: groupSet.tmLiftId,
+        reps: decision.prescribedReps,
+        isAmrap: false,
+        isBonus: true,
+      });
+    }
   }
 
   async function markSetDone() {
@@ -338,25 +462,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     // per-set reps so the user can grind out the remaining volume.
     const groupKey = getVolumeGroupKey(justCompletedSet);
     if (groupKey) {
-      const decision = evaluateBonusSetNeed(
-        groupKey,
-        workoutSets,
-        completedSets.map((s) => s.actualReps),
-        currentSetIndex,
-        volumeGroups,
-      );
-      if (decision.shouldAdd) {
-        const isAccessory = justCompletedSet.tmPercentage === null;
-        const insertIndex = computeBonusInsertionIndex(workoutSets, currentSetIndex, isAccessory);
-        workoutSets.splice(insertIndex, 0, {
-          exerciseId: justCompletedSet.exerciseId,
-          tmPercentage: justCompletedSet.tmPercentage,
-          tmLiftId: justCompletedSet.tmLiftId,
-          reps: decision.prescribedReps,
-          isAmrap: false,
-          isBonus: true,
-        });
-      }
+      reconcileVolumeGroup(groupKey);
     }
 
     // Persist in-progress state to IndexedDB

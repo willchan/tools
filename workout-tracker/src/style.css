@@ -546,6 +546,13 @@ body {
 
 .set-result {
   margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.edit-set-btn {
+  margin-left: auto;
 }
 
 .set-reps-done {
