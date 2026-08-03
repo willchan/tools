@@ -10,9 +10,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "playwright test",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "cap:sync": "bun run build && cap sync ios",
+    "cap:open:ios": "cap open ios"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.0",
+    "@capacitor/ios": "8.5.0",
     "@playwright/test": "1.56.0",
     "eslint": "^10.0.3",
     "typescript": "~5.7.0",
@@ -20,6 +24,13 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
+    "@capacitor/core": "8.5.0",
+    "@capacitor/filesystem": "8.1.2",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/local-notifications": "8.2.1",
+    "@capacitor/share": "8.0.1",
+    "@capgo/capacitor-updater": "8.51.3",
+    "capacitor-live-activity": "8.2.0",
     "idb": "^8.0.0"
   }
 }

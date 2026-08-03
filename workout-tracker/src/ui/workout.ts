@@ -20,6 +20,7 @@ import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
 import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification, primeAudioContext } from './notifications';
 import { log as logEvent } from '../logic/logger';
+import { startWorkoutActivity, updateWorkoutActivity, endWorkoutActivity } from '../native/liveActivity';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let isResting = false;
@@ -72,6 +73,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   let workoutStartTime = Date.now();
   let timerExpiredTimeout: ReturnType<typeof setTimeout> | null = null;
   let timerExpiredClickDismiss: (() => void) | null = null;
+  // Rest-timer end time as last reported to the Live Activity (native-only;
+  // no-op on web). Tracked separately from the DOM/IndexedDB timer state so
+  // the activity payload can be rebuilt on demand without re-reading either.
+  let liveActivityRestEndTime: number | null = null;
 
   // Restore in-progress workout if one exists for this same day
   const activeWorkout = await getActiveWorkout();
@@ -476,6 +481,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       startedAt: workoutStartTime,
       workoutSets: [...workoutSets],
     });
+    syncLiveActivity(null);
 
     // Rest timer logic
     if (currentSetIndex < workoutSets.length) {
@@ -507,6 +513,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     renderSets();
   }
 
+  function liveActivityState() {
+    return {
+      dayName: day.name,
+      exerciseName: workoutSets[currentSetIndex]?.exerciseId ?? '',
+      setIndex: Math.min(currentSetIndex + 1, workoutSets.length),
+      setTotal: workoutSets.length,
+      restEndTime: liveActivityRestEndTime,
+    };
+  }
+
+  function syncLiveActivity(restEndTime: number | null) {
+    liveActivityRestEndTime = restEndTime;
+    void updateWorkoutActivity(liveActivityState());
+  }
+
   function setDoneButtonDisabled(disabled: boolean) {
     isResting = disabled;
     const doneBtn = setsContainer.querySelector('.done-set-btn') as HTMLButtonElement | null;
@@ -532,6 +553,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
     scheduleBackgroundTimerNotification(timer.expectedEndTime);
+    syncLiveActivity(timer.expectedEndTime);
 
     timerEl.classList.remove('hidden');
     setDoneButtonDisabled(true);
@@ -563,6 +585,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         setDoneButtonDisabled(false);
         // Cancel the SW background timer — the main thread is handling this one
         cancelBackgroundTimerNotification();
+        syncLiveActivity(null);
         fireTimerNotification();
         showTimerExpired(timerEl);
       }
@@ -725,6 +748,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     cancelBackgroundTimerNotification();
+    void endWorkoutActivity();
     await putTimerState(null);
     await putActiveWorkout(null);
 
@@ -746,6 +770,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     cancelBackgroundTimerNotification();
+    void endWorkoutActivity();
     await putTimerState(null);
     navigate('home');
   });
@@ -776,6 +801,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       releaseWakeLock();
       if (timerInterval) clearInterval(timerInterval);
       cancelBackgroundTimerNotification();
+      void endWorkoutActivity();
       await logEvent('info', 'workout abandoned', `${day!.name} after ${completedSets.length} sets`);
       navigate('home');
     });
@@ -793,6 +819,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     timerEl.classList.add('hidden');
     setDoneButtonDisabled(false);
     cancelBackgroundTimerNotification();
+    syncLiveActivity(null);
     await putTimerState(null);
   });
 
@@ -816,6 +843,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       await putTimerState(null);
       setDoneButtonDisabled(false);
       cancelBackgroundTimerNotification();
+      syncLiveActivity(null);
       fireTimerNotification();
       showTimerExpired(timerEl);
     })();
@@ -829,6 +857,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   if (existingTimer) {
     const remaining = getRemainingMs(existingTimer);
     if (remaining > 0) {
+      liveActivityRestEndTime = existingTimer.expectedEndTime;
       timerEl.classList.remove('hidden');
       setDoneButtonDisabled(true);
       let recoveryCompleting = false;
@@ -850,6 +879,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           await putTimerState(null);
           setDoneButtonDisabled(false);
           cancelBackgroundTimerNotification();
+          syncLiveActivity(null);
           fireTimerNotification();
           showTimerExpired(timerEl);
         }
@@ -863,6 +893,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   }
 
   renderSets();
+  void startWorkoutActivity(liveActivityState());
 }
 
 /**

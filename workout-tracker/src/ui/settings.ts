@@ -13,6 +13,7 @@ import {
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
 import { requestNotificationPermission } from './notifications';
+import { isNativePlatform } from '../native/platform';
 import {
   getAllLogs,
   clearLogs,
@@ -248,13 +249,34 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
 
   document.getElementById('export-btn')?.addEventListener('click', async () => {
     const data = await exportAll();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `workout-data-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const json = JSON.stringify(data, null, 2);
+    const filename = `workout-data-${new Date().toISOString().split('T')[0]}.json`;
+
+    if (isNativePlatform()) {
+      // A browser <a download> blob produces no usable file inside a
+      // Capacitor WKWebView shell (no download manager/chrome), so write the
+      // file to disk and hand it to the native share sheet instead — AirDrop
+      // to another device, Files app, Messages, etc.
+      const [{ Filesystem, Directory, Encoding }, { Share }] = await Promise.all([
+        import('@capacitor/filesystem'),
+        import('@capacitor/share'),
+      ]);
+      const { uri } = await Filesystem.writeFile({
+        path: filename,
+        data: json,
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8,
+      });
+      await Share.share({ title: filename, url: uri, files: [uri] });
+    } else {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
     await log('info', 'data exported');
   });
 

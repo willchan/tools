@@ -1,4 +1,5 @@
 import { log } from '../logic/logger';
+import { isNativePlatform } from '../native/platform';
 
 function postToSW(message: Record<string, unknown>): void {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
@@ -6,8 +7,38 @@ function postToSW(message: Record<string, unknown>): void {
   }
 }
 
+// Fixed id: only one rest timer is ever active at a time, so a new schedule
+// call always supersedes (and a cancel always targets) the same notification.
+const NATIVE_TIMER_NOTIFICATION_ID = 1;
+
 export function scheduleBackgroundTimerNotification(expectedEndTime: number): void {
-  postToSW({ type: 'TIMER_START', expectedEndTime });
+  if (isNativePlatform()) {
+    // Native local notifications are scheduled with an absolute fire time —
+    // the OS wakes the app for this, unlike the SW setTimeout path below,
+    // which iOS can suspend before it elapses.
+    void import('@capacitor/local-notifications')
+      .then(({ LocalNotifications }) =>
+        LocalNotifications.schedule({
+          notifications: [
+            {
+              id: NATIVE_TIMER_NOTIFICATION_ID,
+              title: 'Rest Timer Complete',
+              body: 'Time for your next set!',
+              schedule: { at: new Date(expectedEndTime) },
+              sound: 'timer-done.wav',
+            },
+          ],
+        }),
+      )
+      .catch((err: unknown) => {
+        void log(
+          'warn',
+          `native timer notification schedule failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  } else {
+    postToSW({ type: 'TIMER_START', expectedEndTime });
+  }
   const delayMs = expectedEndTime - Date.now();
   void log(
     'info',
@@ -17,7 +48,20 @@ export function scheduleBackgroundTimerNotification(expectedEndTime: number): vo
 }
 
 export function cancelBackgroundTimerNotification(): void {
-  postToSW({ type: 'TIMER_CANCEL' });
+  if (isNativePlatform()) {
+    void import('@capacitor/local-notifications')
+      .then(({ LocalNotifications }) =>
+        LocalNotifications.cancel({ notifications: [{ id: NATIVE_TIMER_NOTIFICATION_ID }] }),
+      )
+      .catch((err: unknown) => {
+        void log(
+          'warn',
+          `native timer notification cancel failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  } else {
+    postToSW({ type: 'TIMER_CANCEL' });
+  }
 }
 
 /**
@@ -42,6 +86,12 @@ export function installSwTimerLogging(): void {
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {
+  if (isNativePlatform()) {
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const status = await LocalNotifications.requestPermissions();
+    return status.display === 'granted';
+  }
+
   if (!('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
   if (Notification.permission === 'denied') return false;
@@ -111,8 +161,16 @@ function playBeepPattern(): void {
 }
 
 export function fireTimerNotification(): void {
-  // Vibrate the device (works even without notification permission)
-  if ('vibrate' in navigator) {
+  if (isNativePlatform()) {
+    // navigator.vibrate is unimplemented in WebKit, so the native app gets
+    // real Taptic Engine feedback here instead of the (silently no-op) call
+    // in the web branch below.
+    void import('@capacitor/haptics')
+      .then(({ Haptics, NotificationType }) => Haptics.notification({ type: NotificationType.Success }))
+      .catch((err: unknown) => {
+        void log('warn', `haptics failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  } else if ('vibrate' in navigator) {
     navigator.vibrate([200, 100, 200, 100, 200]);
   }
 

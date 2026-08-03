@@ -8,9 +8,11 @@ import { renderHistory } from './ui/history';
 import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
 import { installSwTimerLogging } from './ui/notifications';
+import { checkForOtaUpdate } from './native/otaUpdate';
 
 installGlobalErrorHandlers();
 installSwTimerLogging();
+void checkForOtaUpdate();
 
 const app = document.getElementById('app')!;
 

@@ -1,0 +1,47 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths: ['workout-tracker/**']
+  pull_request:
+    branches: [main]
+    paths: ['workout-tracker/**']
+  workflow_dispatch:
+
+jobs:
+  simulator-build:
+    # willchan/tools is public, so macos-* GitHub-hosted runners are free
+    # with no minute cap — this verifies the native Xcode project (including
+    # the widget extension, once added) compiles, with no signing and no
+    # Apple Developer account required.
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: workout-tracker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build web bundle
+        run: bun run build
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Build for iOS Simulator
+        working-directory: workout-tracker/ios/App
+        run: |
+          xcodebuild build \
+            -scheme App \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
