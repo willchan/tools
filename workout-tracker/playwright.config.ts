@@ -26,6 +26,10 @@ export default defineConfig({
       name: 'mobile-chrome',
       use: { ...devices['Pixel 5'] },
     },
+    {
+      name: 'iphone-webkit',
+      use: { ...devices['iPhone 15'] },
+    },
   ],
   webServer: {
     command: 'bun run dev',

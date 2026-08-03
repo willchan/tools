@@ -257,9 +257,9 @@ test.describe('Intersperse Accessories', () => {
     // Timer should still be visible (continuing from previous rest)
     await expect(page.locator('#rest-timer')).toBeVisible();
 
-    // Timer should NOT have reset to full duration (1:30).
-    // It should show something <= what it was before (still counting down).
-    const timerAfter = await page.locator('#timer-value').textContent();
-    expect(timerAfter).not.toBe('1:30');
+    // Timer should NOT have reset to full duration (1:30). Use a retrying
+    // assertion rather than a single textContent() snapshot, since a brief
+    // re-render on click can otherwise be caught mid-transition.
+    await expect(page.locator('#timer-value')).not.toHaveText('1:30');
   });
 });
