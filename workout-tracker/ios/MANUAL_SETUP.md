@@ -5,6 +5,29 @@ builds headlessly in `.github/workflows/ios.yml` on a GitHub-hosted macOS
 runner. The steps below need a real Mac with Xcode and only need to be done
 once (or again if the widget target gets removed/regenerated).
 
+## Test coverage layers
+
+Three layers exist, each covering something the others can't:
+
+1. **`e2e/native-platform.spec.ts` (Playwright, runs everywhere, no Mac needed).**
+   Forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform`
+   (Capacitor's own override for exactly this purpose) and drives each
+   plugin's real "web" fallback implementation — verifying our TS wiring
+   (`src/native/*`, `notifications.ts`, `workout.ts`, `settings.ts`) calls
+   the right plugin methods with the right arguments. Runs in a plain
+   browser, so it can't touch actual ActivityKit/UNUserNotificationCenter.
+2. **`ios.yml`'s Simulator smoke test (CI only, no Mac needed).** Boots a
+   real iOS Simulator, installs the built app, and confirms the WKWebView
+   actually loads and runs the web bundle inside the native shell (via a
+   console marker in `src/main.ts`) — catching native-shell-level breakage
+   (crash on launch, blank WebView, bad bundle) that a browser-only test
+   can't see. It doesn't drive the UI, so it can't verify that tapping a
+   button actually schedules a notification or starts a Live Activity.
+3. **Manual verification on a real device (see "First run" below).** The
+   only way to confirm actual Live Activity rendering and notification
+   delivery, since Live Activities don't render in the Simulator at all and
+   this repo has no XCUITest target driving on-device UI interaction.
+
 ## 1. Bundle the rest-timer notification sound
 
 `ios/App/App/timer-done.wav` is already in the repo (a 3-beep tone matching

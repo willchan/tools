@@ -87,7 +87,11 @@ cd workout-tracker && bun run cap:open:ios   # opens the Xcode project
 cd workout-tracker && bun run cap:sync       # build + `cap sync ios`
 ```
 
-`.github/workflows/ios.yml` builds the Xcode project for the iOS Simulator (no signing) on a free macOS GitHub-hosted runner, so the native project and widget extension are verified to compile on every push — without needing a Mac or an Apple Developer account. TestFlight distribution (code signing, App Store Connect upload) is intentionally not set up yet.
+`.github/workflows/ios.yml` builds the Xcode project for the iOS Simulator (no signing) on a free macOS GitHub-hosted runner, so the native project and widget extension are verified to compile on every push — without needing a Mac or an Apple Developer account. It then boots a real Simulator, installs the built app, and confirms the WKWebView actually loads and runs the web bundle (a minimal native smoke test, distinct from just compiling). TestFlight distribution (code signing, App Store Connect upload) is intentionally not set up yet.
+
+### Native code test coverage
+
+`e2e/native-platform.spec.ts` covers the native branches added above — it forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform` (Capacitor's own supported override) and asserts each plugin call, using the real "web" fallback implementations already in each installed package rather than hand-rolled mocks. This runs as part of the normal Playwright suite (no Mac needed) and catches wiring regressions (wrong arguments, a call site removed, a missing await), but can't verify real ActivityKit/UNUserNotificationCenter behavior — see `ios/MANUAL_SETUP.md` for what each of the three test layers (Playwright wiring tests, the CI Simulator smoke test, manual on-device verification) does and doesn't cover.
 
 ## PWA Mechanics
 
