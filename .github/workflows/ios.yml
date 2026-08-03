@@ -15,7 +15,14 @@ jobs:
     # with no minute cap — this verifies the native Xcode project (including
     # the widget extension, once added) compiles, with no signing and no
     # Apple Developer account required.
-    runs-on: macos-15
+    #
+    # macos-latest (rather than pinning e.g. macos-15) because
+    # capacitor-live-activity's Swift source references iOS 26 ActivityKit
+    # APIs (ActivityState.pending, the scheduled-activity Activity.request
+    # overload) unconditionally, even though this app only calls
+    # startActivity/updateActivity/endActivity — so the runner's Xcode needs
+    # to ship the iOS 26 SDK regardless of which app-level APIs are used.
+    runs-on: macos-latest
     timeout-minutes: 30
     defaults:
       run:
@@ -36,6 +43,11 @@ jobs:
 
       - name: Sync Capacitor iOS project
         run: npx cap sync ios
+
+      - name: Xcode version and SDKs
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
 
       - name: Build for iOS Simulator
         working-directory: workout-tracker/ios/App
