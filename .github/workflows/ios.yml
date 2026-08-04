@@ -96,21 +96,28 @@ jobs:
       # shell (as opposed to just compiling). src/main.ts logs a distinctive
       # marker via console.log once init() completes; Capacitor's iOS bridge
       # forwards WKWebView console.* calls to Swift.print() (CAPLog.swift),
-      # which `simctl launch --console-pty` streams back to us as the
-      # process's stdout. This can't verify ActivityKit/notification
-      # behavior (Live Activities specifically don't render in the Simulator
-      # at all — see ios/MANUAL_SETUP.md), only that the app+web bundle boots.
+      # which iOS routes through the unified logging system — captured here
+      # via `log stream` rather than `simctl launch --console-pty`, since
+      # the latter relays output through simctl's own stdout, which (being
+      # redirected to a file, not a real terminal) can fully-buffer and only
+      # flush on process exit — in CI this showed up as either partial or
+      # completely empty captures depending on exactly when the wrapper got
+      # killed. `log stream` reads from the logging daemon directly, so it
+      # isn't subject to a launched process's own stdio buffering.
       - name: "Smoke test: app launches and the web bundle runs"
         run: |
           set +e
-          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
-            com.willchan.workouttracker > /tmp/app_console.log 2>&1 &
-          LAUNCH_PID=$!
+          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log stream \
+            --style compact --level debug --predicate 'process == "App"' \
+            > /tmp/app_console.log 2>&1 &
+          LOG_PID=$!
+          sleep 2
+
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.willchan.workouttracker
 
           # Poll instead of a fixed sleep: a cold Simulator boot + app launch
           # + WKWebView first navigation (including seedDefaults()'s initial
-          # IndexedDB write) is variable, and a single short sleep raced the
-          # kill against the app still starting up.
+          # IndexedDB write) is variable.
           FOUND=0
           for i in $(seq 1 30); do
             if grep -q "WORKOUT_TRACKER_APP_READY" /tmp/app_console.log 2>/dev/null; then
@@ -119,7 +126,7 @@ jobs:
             fi
             sleep 1
           done
-          kill "$LAUNCH_PID" 2>/dev/null
+          kill "$LOG_PID" 2>/dev/null
 
           cat /tmp/app_console.log
           if [ "$FOUND" = "1" ]; then
