@@ -34,6 +34,24 @@ jobs:
           cp -r workout-tracker/dist dist/workout-tracker
           cp index.html dist/index.html
 
+      - name: Publish OTA bundle for the iOS app
+        # Capacitor bakes dist/ into the native binary at build time, so
+        # installed iOS apps don't get web-layer changes from a plain push.
+        # @capgo/capacitor-updater (see src/native/otaUpdate.ts) checks this
+        # self-hosted channel on launch and hot-swaps the JS/HTML/CSS bundle
+        # without an App Store review, using the same Pages deploy as the PWA.
+        run: |
+          version="${GITHUB_SHA::7}"
+          ota_dir="$(pwd)/dist/ota/workout-tracker"
+          mkdir -p "$ota_dir"
+          (cd workout-tracker/dist && zip -r "$ota_dir/dist-${version}.zip" .)
+          cat > "$ota_dir/update.json" <<EOF
+          {
+            "version": "${version}",
+            "url": "https://willchan.github.io/tools/ota/workout-tracker/dist-${version}.zip"
+          }
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

@@ -8,9 +8,11 @@ import { renderHistory } from './ui/history';
 import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
 import { installSwTimerLogging } from './ui/notifications';
+import { checkForOtaUpdate } from './native/otaUpdate';
 
 installGlobalErrorHandlers();
 installSwTimerLogging();
+void checkForOtaUpdate();
 
 const app = document.getElementById('app')!;
 
@@ -33,6 +35,11 @@ async function init() {
     'app started',
     `commit=${__APP_COMMIT__} buildTime=${__BUILD_TIME__} notificationPermission=${notifPermission} swController=${swController}`,
   );
+  // Scraped by .github/workflows/ios.yml's Simulator smoke test (via
+  // `simctl launch --console-pty`, which Capacitor's iOS bridge forwards
+  // console.* calls into) to confirm the WKWebView actually loaded and ran
+  // this bundle inside the native shell, not just that Xcode compiled it.
+  console.log('WORKOUT_TRACKER_APP_READY');
   startRouter();
 }
 

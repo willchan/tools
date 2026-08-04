@@ -17,6 +17,10 @@ workout-tracker/
 │   │   ├── calculator.ts     # Weight calculation, plate calculator, TM math
 │   │   ├── progression.ts    # State machine for day/week/cycle advancement
 │   │   └── timer.ts          # Resilient rest timer (survives tab suspension)
+│   ├── native/                # iOS-native code paths (no-op on web)
+│   │   ├── platform.ts        # Capacitor.isNativePlatform() wrapper
+│   │   ├── liveActivity.ts    # Lock screen / Dynamic Island Live Activity
+│   │   └── otaUpdate.ts       # Self-hosted OTA web-bundle updates
 │   └── ui/
 │       ├── router.ts         # Hash-based SPA router
 │       ├── home.ts           # Home screen with "Start Next Workout" flow
@@ -40,6 +44,8 @@ workout-tracker/
 │   ├── history.spec.ts       # History screen tests
 │   ├── settings.spec.ts      # Settings screen tests
 │   └── pwa.spec.ts           # PWA capability tests
+├── ios/                       # Native Xcode project (Capacitor), see iOS App section below
+├── capacitor.config.ts        # Capacitor config (webDir: 'dist')
 ├── index.html
 ├── vite.config.ts            # Vite config (no minification, sourcemaps)
 ├── playwright.config.ts      # Playwright config (runs against Vite dev server)
@@ -60,6 +66,32 @@ The app uses a sequential state machine (`cycle`, `weekIndex`, `dayIndex`) rathe
 
 ### Exportable Data Model
 The entire database can be exported as a single JSON object via `exportAll()`. This prepares for future Dropbox/iCloud sync.
+
+## iOS App (Capacitor)
+
+An optional native iOS shell lives alongside the PWA — same `src/`, wrapped by [Capacitor](https://capacitorjs.com/) in a WKWebView. This exists because iOS Safari throttles/suspends the service worker in the background, so the PWA's rest-timer notifications can fire late, and Live Activities (lock screen / Dynamic Island) require native ActivityKit. The web app is unaffected: native code paths are additive and no-op when `Capacitor.isNativePlatform()` is false.
+
+- `capacitor.config.ts` — Capacitor config (`webDir: 'dist'`).
+- `ios/` — the native Xcode project, checked into git. `ios/MANUAL_SETUP.md` documents the one-time Xcode steps (widget extension, capabilities, bundling the notification sound) that need a real Mac.
+- `src/native/platform.ts` — `Capacitor.isNativePlatform()` wrapper used to branch native/web code paths.
+- `src/native/liveActivity.ts` — start/update/end a Live Activity via the `capacitor-live-activity` plugin; no-op on web.
+- `src/native/otaUpdate.ts` — self-hosted over-the-air web-bundle updates via `@capgo/capacitor-updater`, since Capacitor bakes `dist/` into the binary at build time.
+- `src/ui/notifications.ts` — on native, rest-timer notifications are scheduled with `@capacitor/local-notifications` using an absolute fire time (`schedule.at`), instead of the web path's service-worker `setTimeout`, which iOS can suspend before it elapses. Haptics use `@capacitor/haptics` in place of the web's `navigator.vibrate` (unimplemented in WebKit).
+- `src/ui/settings.ts` — the "Export Data" button writes the JSON via `@capacitor/filesystem` and opens the native share sheet (`@capacitor/share`) on native, since a browser `<a download>` blob produces no usable file inside a WKWebView shell. Import is unchanged — the `<input type="file">` picker works as-is.
+
+```bash
+# One-time per machine with Xcode installed
+cd workout-tracker && bun run cap:open:ios   # opens the Xcode project
+
+# After changing native deps or config
+cd workout-tracker && bun run cap:sync       # build + `cap sync ios`
+```
+
+`.github/workflows/ios.yml` builds the Xcode project for the iOS Simulator (no signing) on a free macOS GitHub-hosted runner, so the native project and widget extension are verified to compile on every push — without needing a Mac or an Apple Developer account. It then boots a real Simulator, installs the built app, and confirms the WKWebView actually loads and runs the web bundle (a minimal native smoke test, distinct from just compiling). TestFlight distribution (code signing, App Store Connect upload) is intentionally not set up yet.
+
+### Native code test coverage
+
+`e2e/native-platform.spec.ts` covers the native branches added above — it forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform` (Capacitor's own supported override) and asserts each plugin call, using the real "web" fallback implementations already in each installed package rather than hand-rolled mocks. This runs as part of the normal Playwright suite (no Mac needed) and catches wiring regressions (wrong arguments, a call site removed, a missing await), but can't verify real ActivityKit/UNUserNotificationCenter behavior — see `ios/MANUAL_SETUP.md` for what each of the three test layers (Playwright wiring tests, the CI Simulator smoke test, manual on-device verification) does and doesn't cover.
 
 ## PWA Mechanics
 
@@ -91,6 +123,12 @@ Runs on PRs and pushes to `main`:
 Runs on pushes to `main`:
 - Builds the Vite app with Bun
 - Deploys `dist/` to GitHub Pages
+- Publishes an OTA bundle (zip of `dist/` + version manifest) for the iOS app's self-hosted update channel (`src/native/otaUpdate.ts`)
+
+### iOS (`ios.yml`)
+Runs on pushes/PRs touching `workout-tracker/**`, on a macOS GitHub-hosted runner:
+- Builds the Vite app, runs `cap sync ios`
+- Builds the Xcode project for the iOS Simulator, unsigned
 
 ## Running Locally
 

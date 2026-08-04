@@ -1,0 +1,130 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths: ['workout-tracker/**']
+  pull_request:
+    branches: [main]
+    paths: ['workout-tracker/**']
+  workflow_dispatch:
+
+jobs:
+  simulator-build:
+    # willchan/tools is public, so macos-* GitHub-hosted runners are free
+    # with no minute cap — this verifies the native Xcode project (including
+    # the widget extension, once added) compiles, with no signing and no
+    # Apple Developer account required.
+    #
+    # macos-latest (rather than pinning e.g. macos-15) because
+    # capacitor-live-activity's Swift source references iOS 26 ActivityKit
+    # APIs (ActivityState.pending, the scheduled-activity Activity.request
+    # overload) unconditionally, even though this app only calls
+    # startActivity/updateActivity/endActivity — so the runner's Xcode needs
+    # to ship the iOS 26 SDK regardless of which app-level APIs are used.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: workout-tracker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build web bundle
+        run: bun run build
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Xcode version and SDKs
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Build for iOS Simulator
+        working-directory: workout-tracker/ios/App
+        run: |
+          xcodebuild build \
+            -scheme App \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      # The steps above build for the *generic* Simulator destination purely
+      # to verify the project compiles — Xcode resolves that without booting
+      # any concrete device. Actually running the app needs a real simulator
+      # instance, built below against that instance's id so the binary is
+      # guaranteed runnable on it (no signing needed either: the Simulator
+      # never enforces code signing/entitlements the way a physical device
+      # does).
+      - name: Boot an iOS Simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | jq -r '
+            .devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.isAvailable) | .udid
+          ' | head -1)
+          if [ -z "$UDID" ]; then
+            echo "::error::No available iOS simulator runtime found on this runner"
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build and install on the Simulator
+        working-directory: workout-tracker/ios/App
+        run: |
+          xcodebuild build \
+            -scheme App \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skipPackagePluginValidation \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" \
+            "build/Build/Products/Debug-iphonesimulator/App.app"
+
+      # Minimal native smoke test: launch the installed app and confirm the
+      # WKWebView actually loaded and executed our bundle inside the native
+      # shell (as opposed to just compiling). src/main.ts logs a distinctive
+      # marker via console.log once init() completes; Capacitor's iOS bridge
+      # forwards WKWebView console.* calls to Swift.print() (CAPLog.swift),
+      # which `simctl launch --console-pty` streams back to us as the
+      # process's stdout. This can't verify ActivityKit/notification
+      # behavior (Live Activities specifically don't render in the Simulator
+      # at all — see ios/MANUAL_SETUP.md), only that the app+web bundle boots.
+      - name: "Smoke test: app launches and the web bundle runs"
+        run: |
+          set +e
+          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
+            com.willchan.workouttracker > /tmp/app_console.log 2>&1 &
+          LAUNCH_PID=$!
+
+          # Poll instead of a fixed sleep: a cold Simulator boot + app launch
+          # + WKWebView first navigation (including seedDefaults()'s initial
+          # IndexedDB write) is variable, and a single short sleep raced the
+          # kill against the app still starting up.
+          FOUND=0
+          for i in $(seq 1 30); do
+            if grep -q "WORKOUT_TRACKER_APP_READY" /tmp/app_console.log 2>/dev/null; then
+              FOUND=1
+              break
+            fi
+            sleep 1
+          done
+          kill "$LAUNCH_PID" 2>/dev/null
+
+          cat /tmp/app_console.log
+          if [ "$FOUND" = "1" ]; then
+            echo "Smoke test passed: app launched and the web bundle ran inside the native shell."
+          else
+            echo "::error::Marker not found in app console output within 30s — app may have crashed or failed to load the web bundle."
+            exit 1
+          fi
