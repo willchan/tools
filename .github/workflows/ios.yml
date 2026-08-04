@@ -184,15 +184,28 @@ jobs:
       # for the whole `simctl launch` invocation so its output is written to
       # our file as it streams, sidestepping that buffering.
       #
+      # `script -t 0` on top of that, because the pty alone was not enough:
+      # an instrumented run had the app up 3s into the step (per the app's own
+      # log timestamps) while the entire console — pid line, "WebView loaded"
+      # and marker together — only reached our file 31s later, in one flush.
+      # -t sets the flush interval, and 0 flushes every I/O event. That
+      # buffering is very likely what the original failure actually hit: the
+      # marker may have been produced on time and still not been in the file
+      # when the capture was killed.
+      #
       # The wait is split into two phases with independent wall-clock
       # deadlines, and each phase's duration is recorded. A single shared
-      # budget covering both is what failed on main: `simctl launch` took 25s
-      # just to get the app running, leaving the WKWebView's first navigation
-      # only the ~20s remainder before it got killed mid-load. The app was
-      # healthy — the same commit passed on its PR run, where the launch took
-      # 5s and the marker followed ~10s later. Neither phase tracks how fast
+      # budget covering both is what failed on main: the app took 25s to
+      # report as launched, leaving the WKWebView's first navigation only the
+      # ~20s remainder before it got killed mid-load. The app was healthy —
+      # the same commit passed on its PR run. Neither phase tracks how fast
       # the runner is (the failing run had the fastest build steps of any run
       # to date), so both get budgets far above anything yet observed.
+      #
+      # Phase 1 polls the Simulator's launchd rather than the captured
+      # console, so "is the app running" stays a fact about the process and
+      # cannot be distorted by however the capture happens to buffer — which
+      # is what made the earlier launch timings unusable for optimization.
       - name: "Smoke test: app launches and the web bundle runs"
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -201,43 +214,59 @@ jobs:
           set +e
           : > "$LOG"
 
-          script -q "$LOG" \
-            xcrun simctl launch --console-pty "$UDID" "$APP_ID" &
+          # -t 0 is BSD script's flush interval. Probe rather than assume:
+          # if this runner image ships a script(1) without it, capture still
+          # works, just with the buffering described above.
+          if script -t 0 -q /dev/null true >/dev/null 2>&1; then
+            SCRIPT=(script -t 0 -q "$LOG")
+          else
+            echo "::warning::script(1) has no -t flag here; console capture may buffer"
+            SCRIPT=(script -q "$LOG")
+          fi
+
+          "${SCRIPT[@]}" xcrun simctl launch --console-pty "$UDID" "$APP_ID" &
           LAUNCH_PID=$!
 
-          # wait_for <pattern> <timeout-seconds>; also gives up early if the
-          # capture process itself is gone, since simctl stays attached for
-          # as long as the app is running — if it exited, the app crashed or
-          # was terminated and no further output is coming.
-          wait_for() {
+          # wait_until <predicate> <timeout-seconds> <poll-seconds>; also
+          # gives up early if the capture process itself is gone, since simctl
+          # stays attached for as long as the app is running — if it exited,
+          # the app crashed or was terminated and nothing more is coming.
+          wait_until() {
             local deadline=$((SECONDS + $2))
             while [ "$SECONDS" -lt "$deadline" ]; do
-              if grep -q "$1" "$LOG" 2>/dev/null; then
+              if "$1"; then
                 return 0
               fi
               if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
                 return 1
               fi
-              sleep 1
+              sleep "$3"
             done
             return 1
           }
 
-          # Phase 1: simctl reports the app as running ("<bundle id>: <pid>").
+          app_running() {
+            xcrun simctl spawn "$UDID" launchctl list 2>/dev/null \
+              | grep -q "UIKitApplication:$APP_ID"
+          }
+          marker_logged() {
+            grep -q "WORKOUT_TRACKER_APP_READY" "$LOG" 2>/dev/null
+          }
+
+          # Phase 1: the app process is running, per the Simulator's launchd.
           t0=$SECONDS
-          wait_for "$APP_ID: [0-9]" 180
+          wait_until app_running 180 2
           LAUNCHED=$?
-          LAUNCH_SECS=$((SECONDS - t0))
-          printf 'app launch (simctl)\t%s\n' "$LAUNCH_SECS" >> "$TIMINGS"
+          printf 'app launch (process running)\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
 
           # Phase 2: the WKWebView loaded and ran our bundle — src/main.ts
           # logs the marker once init() completes.
           FOUND=1
           if [ "$LAUNCHED" = "0" ]; then
             t0=$SECONDS
-            wait_for "WORKOUT_TRACKER_APP_READY" 180
+            wait_until marker_logged 180 1
             FOUND=$?
-            printf 'webview load + bundle init\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+            printf 'webview load + marker capture\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
           fi
 
           kill "$LAUNCH_PID" 2>/dev/null
