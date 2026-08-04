@@ -36,9 +36,10 @@ async function init() {
     `commit=${__APP_COMMIT__} buildTime=${__BUILD_TIME__} notificationPermission=${notifPermission} swController=${swController}`,
   );
   // Scraped by .github/workflows/ios.yml's Simulator smoke test (via
-  // `log stream`, which picks up console.* calls forwarded through
-  // Capacitor's iOS bridge) to confirm the WKWebView actually loaded and
-  // ran this bundle inside the native shell, not just that Xcode compiled it.
+  // `simctl launch --console-pty` under `script`, which picks up console.*
+  // calls forwarded through Capacitor's iOS bridge) to confirm the WKWebView
+  // actually loaded and ran this bundle inside the native shell, not just
+  // that Xcode compiled it.
   console.log('WORKOUT_TRACKER_APP_READY');
   startRouter();
 }

@@ -95,25 +95,24 @@ jobs:
       # WKWebView actually loaded and executed our bundle inside the native
       # shell (as opposed to just compiling). src/main.ts logs a distinctive
       # marker via console.log once init() completes; Capacitor's iOS bridge
-      # forwards WKWebView console.* calls to Swift.print() (CAPLog.swift),
-      # which iOS routes through the unified logging system — captured here
-      # via `log stream` rather than `simctl launch --console-pty`, since
-      # the latter relays output through simctl's own stdout, which (being
-      # redirected to a file, not a real terminal) can fully-buffer and only
-      # flush on process exit — in CI this showed up as either partial or
-      # completely empty captures depending on exactly when the wrapper got
-      # killed. `log stream` reads from the logging daemon directly, so it
-      # isn't subject to a launched process's own stdio buffering.
+      # forwards WKWebView console.* calls to plain Swift.print() (see
+      # CAPLog.swift) — i.e. real stdout, not os_log, so `log stream` (the
+      # unified logging daemon) never sees it, confirmed by an earlier CI
+      # run where `log stream` captured plenty of *other* App-process
+      # activity but never our marker. `simctl launch --console-pty` does
+      # relay real stdout, but relays it through simctl's own stdout, which
+      # (being redirected to a plain file, not a real terminal) can
+      # fully-buffer and only flush on process exit — an earlier attempt hit
+      # exactly that, non-deterministically. `script` allocates a real pty
+      # for the whole `simctl launch` invocation so its output is written to
+      # our file as it streams, sidestepping that buffering.
       - name: "Smoke test: app launches and the web bundle runs"
         run: |
           set +e
-          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log stream \
-            --style compact --level debug --predicate 'process == "App"' \
-            > /tmp/app_console.log 2>&1 &
-          LOG_PID=$!
-          sleep 2
-
-          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.willchan.workouttracker
+          script -q /tmp/app_console.log \
+            xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
+            com.willchan.workouttracker &
+          LAUNCH_PID=$!
 
           # Poll instead of a fixed sleep: a cold Simulator boot + app launch
           # + WKWebView first navigation (including seedDefaults()'s initial
@@ -126,7 +125,8 @@ jobs:
             fi
             sleep 1
           done
-          kill "$LOG_PID" 2>/dev/null
+          kill "$LAUNCH_PID" 2>/dev/null
+          pkill -f "simctl launch --console-pty" 2>/dev/null
 
           cat /tmp/app_console.log
           if [ "$FOUND" = "1" ]; then
