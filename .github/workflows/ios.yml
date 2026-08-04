@@ -27,47 +27,34 @@ jobs:
     defaults:
       run:
         working-directory: workout-tracker
+    env:
+      # Every step appends "<phase>\t<seconds>" here; the final step renders
+      # them into the run's job summary. Step-level durations are already in
+      # the Actions UI — this exists for the sub-step phases that aren't
+      # (Simulator boot wait vs. app launch vs. WKWebView load), which is
+      # where this job's wall time actually varies run to run.
+      TIMINGS: /tmp/ios-timings.tsv
+      APP_ID: com.willchan.workouttracker
+      APP_PATH: build/Build/Products/Debug-iphonesimulator/App.app
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build web bundle
-        run: bun run build
-
-      - name: Sync Capacitor iOS project
-        run: npx cap sync ios
-
-      - name: Xcode version and SDKs
-        run: |
-          xcodebuild -version
-          xcodebuild -showsdks
-
-      - name: Build for iOS Simulator
-        working-directory: workout-tracker/ios/App
-        run: |
-          xcodebuild build \
-            -scheme App \
-            -destination 'generic/platform=iOS Simulator' \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO
-
-      # The steps above build for the *generic* Simulator destination purely
-      # to verify the project compiles — Xcode resolves that without booting
-      # any concrete device. Actually running the app needs a real simulator
-      # instance, built below against that instance's id so the binary is
-      # guaranteed runnable on it (no signing needed either: the Simulator
-      # never enforces code signing/entitlements the way a physical device
-      # does).
-      - name: Boot an iOS Simulator
+      # Kick the Simulator boot off first and don't wait for it: `simctl boot`
+      # returns as soon as the boot is under way, so the ~1-3min it takes to
+      # come up overlaps the Xcode build below instead of adding to it. The
+      # matching `bootstatus -b` wait runs just before the app is installed.
+      #
+      # Overlapping also buys the device a long settle window. `bootstatus -b`
+      # returns once SpringBoard is up, but first-boot background work
+      # (installd, keychain, dyld closure priming) keeps running after that,
+      # and the app's first launch competes with it — the one run where the
+      # first launch stalled was also the run with the shortest gap between
+      # boot and launch, though at n=1 that's a hypothesis, not a conclusion.
+      - name: Start booting an iOS Simulator
         id: sim
         run: |
+          t0=$SECONDS
           UDID=$(xcrun simctl list devices available -j | jq -r '
             .devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.isAvailable) | .udid
           ' | head -1)
@@ -77,19 +64,109 @@ jobs:
           fi
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
+          printf 'simulator boot (start, async)\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
 
-      - name: Build and install on the Simulator
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: |
+          t0=$SECONDS
+          bun install
+          printf 'bun install\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
+      - name: Build web bundle
+        run: |
+          t0=$SECONDS
+          bun run build
+          printf 'web bundle build\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
+      - name: Sync Capacitor iOS project
+        run: |
+          t0=$SECONDS
+          npx cap sync ios
+          printf 'cap sync ios\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
+      - name: Xcode version and SDKs
+        id: xcode
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+          echo "version=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      # The build compiles seven SPM packages from source (Capacitor core plus
+      # the six plugins in CapApp-SPM/Package.swift), which dominates it.
+      # Caching DerivedData — SourcePackages checkouts, module cache and all —
+      # keeps that off the critical path when only app sources changed. Keyed
+      # on the Xcode version because a toolchain change invalidates the module
+      # cache, and on the manifests that determine which packages get built.
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: workout-tracker/ios/App/build
+          key: ios-deriveddata-${{ steps.xcode.outputs.version }}-${{ hashFiles('workout-tracker/bun.lock', 'workout-tracker/ios/App/CapApp-SPM/Package.swift', 'workout-tracker/ios/App/App.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ios-deriveddata-${{ steps.xcode.outputs.version }}-
+
+      # One build, not two. This used to build twice — once for
+      # `generic/platform=iOS Simulator` to prove it compiles, then again for
+      # the booted device's id into a different -derivedDataPath, which shares
+      # nothing with the first and so recompiled everything from scratch (1.5
+      # to 2.5min of pure duplicate work). The generic destination produces
+      # the same Debug-iphonesimulator product, and `simctl install` takes it
+      # on any device of that runtime — so the single generic build both
+      # proves the project compiles and yields the .app that gets installed.
+      # Building for the generic destination also keeps this step independent
+      # of the boot started above, which is what lets the two overlap.
+      - name: Build for the Simulator
         working-directory: workout-tracker/ios/App
         run: |
+          t0=$SECONDS
+          # Drop the previous run's product before building. Compiled objects
+          # and package checkouts restored from cache are what make this fast
+          # and are safe to reuse; a cached .app is not, since a stale one
+          # would let the smoke test pass against an old web bundle. Deleting
+          # it only forces the link and resource-copy phases to rerun.
+          rm -rf "$APP_PATH"
           xcodebuild build \
             -scheme App \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -destination 'generic/platform=iOS Simulator' \
             -skipPackagePluginValidation \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO
-          xcrun simctl install "${{ steps.sim.outputs.udid }}" \
-            "build/Build/Products/Debug-iphonesimulator/App.app"
+          printf 'xcodebuild\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
+      - name: Wait for the Simulator to finish booting
+        run: |
+          t0=$SECONDS
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          printf 'simulator boot (wait, after build)\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
+      - name: Install on the Simulator
+        working-directory: workout-tracker/ios/App
+        run: |
+          t0=$SECONDS
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP_PATH"
+          printf 'simctl install\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
+      # A cold first launch pays one-time costs the smoke test shouldn't be
+      # measuring: dyld closure generation, faulting in the app binary and its
+      # frameworks, and starting WKWebView's three helper processes for the
+      # first time on this device. Burn those here so the assertion below is
+      # timing a warm launch. Failures are ignored on purpose — this step
+      # exists to warm caches, and the smoke test is what decides pass/fail.
+      #
+      # Note this leaves the app's IndexedDB already seeded, so the measured
+      # launch no longer covers seedDefaults()'s cold path; the Playwright E2E
+      # suite covers that on every run with a fresh browser context.
+      - name: Pre-warm the app
+        run: |
+          t0=$SECONDS
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" "$APP_ID" || true
+          sleep 10
+          xcrun simctl terminate "${{ steps.sim.outputs.udid }}" "$APP_ID" || true
+          printf 'app pre-warm launch\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
 
       # Minimal native smoke test: launch the installed app and confirm the
       # WKWebView actually loaded and executed our bundle inside the native
@@ -108,15 +185,14 @@ jobs:
       # our file as it streams, sidestepping that buffering.
       #
       # The wait is split into two phases with independent wall-clock
-      # deadlines. A single shared budget covering both is what failed on
-      # main: `simctl launch` took 25s just to get the app running on a
-      # loaded runner, so the WKWebView's first navigation was left with
-      # only the ~20s remainder and got killed mid-load — the app itself was
-      # healthy, and the same commit passed on its PR run where the launch
-      # took 5s. Both phases are dominated by how contended the runner is,
-      # not by anything this repo controls, so they get generous budgets;
-      # the happy path still finishes in seconds and exits as soon as the
-      # marker shows up.
+      # deadlines, and each phase's duration is recorded. A single shared
+      # budget covering both is what failed on main: `simctl launch` took 25s
+      # just to get the app running, leaving the WKWebView's first navigation
+      # only the ~20s remainder before it got killed mid-load. The app was
+      # healthy — the same commit passed on its PR run, where the launch took
+      # 5s and the marker followed ~10s later. Neither phase tracks how fast
+      # the runner is (the failing run had the fastest build steps of any run
+      # to date), so both get budgets far above anything yet observed.
       - name: "Smoke test: app launches and the web bundle runs"
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -126,8 +202,7 @@ jobs:
           : > "$LOG"
 
           script -q "$LOG" \
-            xcrun simctl launch --console-pty "$UDID" \
-            com.willchan.workouttracker &
+            xcrun simctl launch --console-pty "$UDID" "$APP_ID" &
           LAUNCH_PID=$!
 
           # wait_for <pattern> <timeout-seconds>; also gives up early if the
@@ -149,21 +224,25 @@ jobs:
           }
 
           # Phase 1: simctl reports the app as running ("<bundle id>: <pid>").
-          wait_for "com.willchan.workouttracker: [0-9]" 180
+          t0=$SECONDS
+          wait_for "$APP_ID: [0-9]" 180
           LAUNCHED=$?
+          LAUNCH_SECS=$((SECONDS - t0))
+          printf 'app launch (simctl)\t%s\n' "$LAUNCH_SECS" >> "$TIMINGS"
 
           # Phase 2: the WKWebView loaded and ran our bundle — src/main.ts
-          # logs the marker once init() completes (including seedDefaults()'s
-          # initial IndexedDB write).
+          # logs the marker once init() completes.
           FOUND=1
           if [ "$LAUNCHED" = "0" ]; then
+            t0=$SECONDS
             wait_for "WORKOUT_TRACKER_APP_READY" 180
             FOUND=$?
+            printf 'webview load + bundle init\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
           fi
 
           kill "$LAUNCH_PID" 2>/dev/null
           pkill -f "simctl launch --console-pty" 2>/dev/null
-          xcrun simctl terminate "$UDID" com.willchan.workouttracker 2>/dev/null
+          xcrun simctl terminate "$UDID" "$APP_ID" 2>/dev/null
 
           echo "--- app console output ---"
           cat "$LOG"
@@ -178,3 +257,21 @@ jobs:
             exit 1
           fi
           echo "Smoke test passed: app launched and the web bundle ran inside the native shell."
+
+      # Runs even when something above failed: a timed-out smoke test is
+      # exactly when the phase breakdown is worth reading.
+      - name: Timing summary
+        if: always()
+        run: |
+          if [ ! -s "$TIMINGS" ]; then
+            echo "No timings recorded."
+            exit 0
+          fi
+          {
+            echo "### iOS job timings"
+            echo
+            echo "| phase | seconds |"
+            echo "| --- | ---: |"
+            awk -F'\t' '{ total += $2; printf "| %s | %s |\n", $1, $2 }
+                        END { printf "| **measured total** | **%d** |\n", total }' "$TIMINGS"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
