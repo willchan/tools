@@ -92,15 +92,23 @@ test.describe('Native rest-timer notifications', () => {
     await page.waitForSelector('#app');
 
     await page.evaluate(async () => {
-      const { scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification } = await import(
-        '/src/ui/notifications.ts'
-      );
+      const { requestNotificationPermission, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification } =
+        await import('/src/ui/notifications.ts');
+
+      // Capacitor's registerPlugin lazily loads a plugin's web implementation
+      // on first call, caching the instance only once that load resolves. Two
+      // calls into the SAME plugin fired close together, before that first
+      // load resolves, can each see "not loaded yet" and construct their own
+      // separate instance — so schedule() and cancel() would silently act on
+      // different LocalNotificationsWeb objects. A fixed delay between them
+      // is a race, not a fix (it was too short on WebKit in CI); await a
+      // real call through the same plugin first so its singleton is already
+      // cached by the time schedule/cancel run. (Can't import the npm
+      // package directly here — page.evaluate() isn't Vite-transformed, so
+      // bare specifiers don't resolve; only our own /src/... modules do.)
+      await requestNotificationPermission();
+
       scheduleBackgroundTimerNotification(Date.now() + 300);
-      // A real "skip" click can never land in the same microtask as the
-      // schedule call that preceded it — give the plugin's (fire-and-forget)
-      // first-load promise chain a moment to settle before cancelling, same
-      // as real usage, rather than racing both against the same await.
-      await new Promise((resolve) => setTimeout(resolve, 50));
       cancelBackgroundTimerNotification();
     });
 

@@ -106,13 +106,25 @@ jobs:
           xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
             com.willchan.workouttracker > /tmp/app_console.log 2>&1 &
           LAUNCH_PID=$!
-          sleep 10
+
+          # Poll instead of a fixed sleep: a cold Simulator boot + app launch
+          # + WKWebView first navigation (including seedDefaults()'s initial
+          # IndexedDB write) is variable, and a single short sleep raced the
+          # kill against the app still starting up.
+          FOUND=0
+          for i in $(seq 1 30); do
+            if grep -q "WORKOUT_TRACKER_APP_READY" /tmp/app_console.log 2>/dev/null; then
+              FOUND=1
+              break
+            fi
+            sleep 1
+          done
           kill "$LAUNCH_PID" 2>/dev/null
 
           cat /tmp/app_console.log
-          if grep -q "WORKOUT_TRACKER_APP_READY" /tmp/app_console.log; then
+          if [ "$FOUND" = "1" ]; then
             echo "Smoke test passed: app launched and the web bundle ran inside the native shell."
           else
-            echo "::error::Marker not found in app console output — app may have crashed or failed to load the web bundle."
+            echo "::error::Marker not found in app console output within 30s — app may have crashed or failed to load the web bundle."
             exit 1
           fi
