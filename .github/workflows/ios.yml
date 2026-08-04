@@ -3,10 +3,10 @@ name: iOS
 on:
   push:
     branches: [main]
-    paths: ['workout-tracker/**']
+    paths: ['workout-tracker/**', '.github/workflows/ios.yml']
   pull_request:
     branches: [main]
-    paths: ['workout-tracker/**']
+    paths: ['workout-tracker/**', '.github/workflows/ios.yml']
   workflow_dispatch:
 
 jobs:
@@ -106,32 +106,75 @@ jobs:
       # exactly that, non-deterministically. `script` allocates a real pty
       # for the whole `simctl launch` invocation so its output is written to
       # our file as it streams, sidestepping that buffering.
+      #
+      # The wait is split into two phases with independent wall-clock
+      # deadlines. A single shared budget covering both is what failed on
+      # main: `simctl launch` took 25s just to get the app running on a
+      # loaded runner, so the WKWebView's first navigation was left with
+      # only the ~20s remainder and got killed mid-load — the app itself was
+      # healthy, and the same commit passed on its PR run where the launch
+      # took 5s. Both phases are dominated by how contended the runner is,
+      # not by anything this repo controls, so they get generous budgets;
+      # the happy path still finishes in seconds and exits as soon as the
+      # marker shows up.
       - name: "Smoke test: app launches and the web bundle runs"
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          LOG: /tmp/app_console.log
         run: |
           set +e
-          script -q /tmp/app_console.log \
-            xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
+          : > "$LOG"
+
+          script -q "$LOG" \
+            xcrun simctl launch --console-pty "$UDID" \
             com.willchan.workouttracker &
           LAUNCH_PID=$!
 
-          # Poll instead of a fixed sleep: a cold Simulator boot + app launch
-          # + WKWebView first navigation (including seedDefaults()'s initial
-          # IndexedDB write) is variable.
-          FOUND=0
-          for i in $(seq 1 30); do
-            if grep -q "WORKOUT_TRACKER_APP_READY" /tmp/app_console.log 2>/dev/null; then
-              FOUND=1
-              break
-            fi
-            sleep 1
-          done
+          # wait_for <pattern> <timeout-seconds>; also gives up early if the
+          # capture process itself is gone, since simctl stays attached for
+          # as long as the app is running — if it exited, the app crashed or
+          # was terminated and no further output is coming.
+          wait_for() {
+            local deadline=$((SECONDS + $2))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if grep -q "$1" "$LOG" 2>/dev/null; then
+                return 0
+              fi
+              if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
+                return 1
+              fi
+              sleep 1
+            done
+            return 1
+          }
+
+          # Phase 1: simctl reports the app as running ("<bundle id>: <pid>").
+          wait_for "com.willchan.workouttracker: [0-9]" 180
+          LAUNCHED=$?
+
+          # Phase 2: the WKWebView loaded and ran our bundle — src/main.ts
+          # logs the marker once init() completes (including seedDefaults()'s
+          # initial IndexedDB write).
+          FOUND=1
+          if [ "$LAUNCHED" = "0" ]; then
+            wait_for "WORKOUT_TRACKER_APP_READY" 180
+            FOUND=$?
+          fi
+
           kill "$LAUNCH_PID" 2>/dev/null
           pkill -f "simctl launch --console-pty" 2>/dev/null
+          xcrun simctl terminate "$UDID" com.willchan.workouttracker 2>/dev/null
 
-          cat /tmp/app_console.log
-          if [ "$FOUND" = "1" ]; then
-            echo "Smoke test passed: app launched and the web bundle ran inside the native shell."
-          else
-            echo "::error::Marker not found in app console output within 30s — app may have crashed or failed to load the web bundle."
+          echo "--- app console output ---"
+          cat "$LOG"
+          echo "--- end app console output ---"
+
+          if [ "$LAUNCHED" != "0" ]; then
+            echo "::error::simctl never reported the app as launched within 180s — the app failed to start on the Simulator."
             exit 1
           fi
+          if [ "$FOUND" != "0" ]; then
+            echo "::error::App launched but the marker never appeared within 180s — the WKWebView failed to load or run the web bundle."
+            exit 1
+          fi
+          echo "Smoke test passed: app launched and the web bundle ran inside the native shell."
