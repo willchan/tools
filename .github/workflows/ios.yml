@@ -100,7 +100,7 @@ jobs:
       # process's stdout. This can't verify ActivityKit/notification
       # behavior (Live Activities specifically don't render in the Simulator
       # at all — see ios/MANUAL_SETUP.md), only that the app+web bundle boots.
-      - name: Smoke test: app launches and the web bundle runs
+      - name: "Smoke test: app launches and the web bundle runs"
         run: |
           set +e
           xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
