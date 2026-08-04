@@ -95,22 +95,28 @@ jobs:
       # WKWebView actually loaded and executed our bundle inside the native
       # shell (as opposed to just compiling). src/main.ts logs a distinctive
       # marker via console.log once init() completes; Capacitor's iOS bridge
-      # forwards WKWebView console.* calls to Swift.print() (CAPLog.swift),
-      # which `simctl launch --console-pty` streams back to us as the
-      # process's stdout. This can't verify ActivityKit/notification
-      # behavior (Live Activities specifically don't render in the Simulator
-      # at all — see ios/MANUAL_SETUP.md), only that the app+web bundle boots.
+      # forwards WKWebView console.* calls to plain Swift.print() (see
+      # CAPLog.swift) — i.e. real stdout, not os_log, so `log stream` (the
+      # unified logging daemon) never sees it, confirmed by an earlier CI
+      # run where `log stream` captured plenty of *other* App-process
+      # activity but never our marker. `simctl launch --console-pty` does
+      # relay real stdout, but relays it through simctl's own stdout, which
+      # (being redirected to a plain file, not a real terminal) can
+      # fully-buffer and only flush on process exit — an earlier attempt hit
+      # exactly that, non-deterministically. `script` allocates a real pty
+      # for the whole `simctl launch` invocation so its output is written to
+      # our file as it streams, sidestepping that buffering.
       - name: "Smoke test: app launches and the web bundle runs"
         run: |
           set +e
-          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
-            com.willchan.workouttracker > /tmp/app_console.log 2>&1 &
+          script -q /tmp/app_console.log \
+            xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" \
+            com.willchan.workouttracker &
           LAUNCH_PID=$!
 
           # Poll instead of a fixed sleep: a cold Simulator boot + app launch
           # + WKWebView first navigation (including seedDefaults()'s initial
-          # IndexedDB write) is variable, and a single short sleep raced the
-          # kill against the app still starting up.
+          # IndexedDB write) is variable.
           FOUND=0
           for i in $(seq 1 30); do
             if grep -q "WORKOUT_TRACKER_APP_READY" /tmp/app_console.log 2>/dev/null; then
@@ -120,6 +126,7 @@ jobs:
             sleep 1
           done
           kill "$LAUNCH_PID" 2>/dev/null
+          pkill -f "simctl launch --console-pty" 2>/dev/null
 
           cat /tmp/app_console.log
           if [ "$FOUND" = "1" ]; then
