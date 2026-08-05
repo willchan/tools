@@ -36,6 +36,8 @@ jobs:
       TIMINGS: /tmp/ios-timings.tsv
       APP_ID: com.willchan.workouttracker
       APP_PATH: build/Build/Products/Debug-iphonesimulator/App.app
+      # Written only when the smoke test fails, uploaded as an artifact.
+      DIAG: /tmp/ios-diagnostics
 
     steps:
       - uses: actions/checkout@v4
@@ -269,6 +271,27 @@ jobs:
             printf 'webview load + marker capture\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
           fi
 
+          # Failure-only evidence, gathered before the app is killed so it
+          # describes the broken state rather than the cleaned-up one. The
+          # screenshot tells a blank WKWebView apart from a rendered UI or a
+          # crash dialog at a glance. The Simulator's unified log is where a
+          # WebContent process crash shows up — the one failure mode the
+          # Capacitor console cannot report, because a dead WebContent prints
+          # nothing at all, which is indistinguishable from a slow load in
+          # the console alone. The next step uploads all of it as an artifact.
+          if [ "$LAUNCHED" != "0" ] || [ "$FOUND" != "0" ]; then
+            mkdir -p "$DIAG"
+            xcrun simctl io "$UDID" screenshot "$DIAG/simulator.png" 2>&1 | tail -3
+            xcrun simctl spawn "$UDID" log show \
+              --predicate 'process == "App" OR process CONTAINS "WebKit"' \
+              --last 5m --style compact > "$DIAG/simulator-log.txt" 2>&1
+            cp "$LOG" "$DIAG/app_console.log" 2>/dev/null
+            cp ~/Library/Logs/DiagnosticReports/App*.ips "$DIAG/" 2>/dev/null
+            cp ~/Library/Logs/DiagnosticReports/*WebContent*.ips "$DIAG/" 2>/dev/null
+            echo "Diagnostics written to $DIAG:"
+            ls -la "$DIAG"
+          fi
+
           kill "$LAUNCH_PID" 2>/dev/null
           pkill -f "simctl launch --console-pty" 2>/dev/null
           xcrun simctl terminate "$UDID" "$APP_ID" 2>/dev/null
@@ -277,15 +300,48 @@ jobs:
           cat "$LOG"
           echo "--- end app console output ---"
 
+          # Capacitor prints each of these natively, in this order, before our
+          # marker can appear. On a failure the last one reached says which
+          # layer broke: no "WebView loaded" means the webview never finished
+          # its first navigation (environment/WebKit), while "WebView loaded"
+          # without "To Native" means it loaded and our bundle did not run
+          # (our bug). Distinguishing those took a second CI round-trip the
+          # last time this failed.
+          if [ "$LAUNCHED" != "0" ] || [ "$FOUND" != "0" ]; then
+            echo "--- native milestones ---"
+            while IFS='|' read -r pattern label; do
+              if grep -q "$pattern" "$LOG" 2>/dev/null; then
+                echo "  reached: $label"
+              else
+                echo "  MISSING: $label"
+              fi
+            done <<'MILESTONES'
+          Loading app at capacitor://localhost|WKWebView started loading the bundle
+          WebView loaded|WKWebView finished its first navigation
+          To Native ->|our JS ran and called through the Capacitor bridge
+          WORKOUT_TRACKER_APP_READY|init() completed (the marker)
+          MILESTONES
+            echo "--- end native milestones ---"
+          fi
+
           if [ "$LAUNCHED" != "0" ]; then
             echo "::error::simctl never reported the app as launched within 180s — the app failed to start on the Simulator."
             exit 1
           fi
           if [ "$FOUND" != "0" ]; then
-            echo "::error::App launched but the marker never appeared within 180s — the WKWebView failed to load or run the web bundle."
+            echo "::error::App launched but the marker never appeared within 180s — see the native milestones above and the uploaded diagnostics artifact."
             exit 1
           fi
           echo "Smoke test passed: app launched and the web bundle ran inside the native shell."
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-smoke-test-diagnostics
+          path: /tmp/ios-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Runs even when something above failed: a timed-out smoke test is
       # exactly when the phase breakdown is worth reading.
