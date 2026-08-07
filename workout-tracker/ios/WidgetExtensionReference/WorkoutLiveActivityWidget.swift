@@ -17,7 +17,7 @@ struct WorkoutLiveActivityWidget: Widget {
         // see ios/MANUAL_SETUP.md step 3 for how to add it to this target.
         ActivityConfiguration(for: GenericAttributes.self) { context in
             VStack(alignment: .leading, spacing: 4) {
-                Text(context.attributes.values["dayName"] ?? "Workout")
+                Text(context.attributes.staticValues["dayName"] ?? "Workout")
                     .font(.headline)
                 Text(context.state.values["exerciseName"] ?? "")
                     .font(.subheadline)
