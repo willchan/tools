@@ -44,18 +44,34 @@ on that page.
    ```
    Keep that password — it's the `APPLE_DIST_CERT_PASSWORD` secret below.
 
-## 4. Provisioning profiles: nothing to do here
+## 4. Provisioning profiles: create the App Store ones by hand once
 
-No manual profile-creation step. The app has (or will have) multiple
-targets — `App`, and eventually the widget extension — each with its own
-bundle ID and needing its own profile. A single profile pinned via repo
-secret only covers one bundle ID at a time, and `xcodebuild`'s command-line
-signing overrides apply to every target in a build, so they can't express
-"this profile for App, that one for the widget." Instead, `ios-testflight.yml`
-passes `-allowProvisioningUpdates` plus the App Store Connect API key from
-step 2, so Xcode resolves (and creates, if needed) the right profile per
-target automatically at build time — as long as the App ID from step 3
-exists for each target.
+Originally this doc claimed nothing manual was needed here —
+`-allowProvisioningUpdates` was expected to resolve (and create, if
+needed) the right profile per target automatically at build time. That's
+true once a device has ever been registered on the team, but **on a
+brand-new team with zero registered devices, it isn't**: automatic
+signing's resolver hits a development-profile-creation step as part of
+gathering provisioning inputs even for an App Store archive, and that step
+hard-fails with "Your team has no devices from which to generate a
+provisioning profile" — confirmed by two failed CI runs on this exact
+error, unrelated to CODE_SIGN_IDENTITY/CODE_SIGN_STYLE (tried both with
+and without an explicit override). App Store distribution profiles
+themselves don't need any device — it's specifically automatic *creation*
+that trips over the zero-device team.
+
+Fix: create the App Store distribution profile for each target's bundle ID
+manually (one time), so `-allowProvisioningUpdates` only has to *discover*
+an existing profile instead of creating one:
+
+developer.apple.com → Certificates, IDs & Profiles → Profiles → **+** →
+**App Store** (under Distribution) → select the App ID → select the
+Apple Distribution certificate from step 3 → name it (anything) → Generate.
+Repeat once per bundle ID that exists as of whenever this is read —
+`com.willchan.workouttracker` and, once the widget extension target
+exists, `com.willchan.workouttracker.LiveActivityWidget`. Nothing needs to
+be downloaded or added as a secret; `-allowProvisioningUpdates` picks them
+up by bundle ID automatically once they exist.
 
 ## 5. Add repo secrets
 
