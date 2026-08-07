@@ -20,7 +20,6 @@ jobs:
       run:
         working-directory: workout-tracker
     env:
-      APP_ID: com.willchan.workouttracker
       EXPORT_METHOD: app-store
 
     steps:
@@ -64,45 +63,54 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $EXISTING
           echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
-      - name: Install provisioning profile
+      # Written once, reused by the archive, export, and upload steps below.
+      # xcodebuild's -authenticationKeyPath/-authenticationKeyID/
+      # -authenticationKeyIssuerID flags are Apple's supported way to give
+      # automatic signing a non-interactive identity on a CI runner where no
+      # Apple ID is ever logged in.
+      - name: Write App Store Connect API key
         env:
-          PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
         run: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "$PROFILE_BASE64" | base64 --decode > profile.mobileprovision
-          PLIST=$(security cms -D -i profile.mobileprovision)
-          UUID=$(echo "$PLIST" | plutil -extract UUID raw -)
-          NAME=$(echo "$PLIST" | plutil -extract Name raw -)
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
-          echo "PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
+          echo "ASC_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
 
-      # Manual signing (not "let Xcode figure it out") so the archive uses
-      # exactly the certificate/profile pair just imported above, rather
-      # than whatever automatic signing would try to fetch from an Apple ID
-      # session that doesn't exist on this runner.
+      # Automatic signing, not manual — the App target and the
+      # LiveActivityWidgetExtension target each have their own bundle ID and
+      # need their own provisioning profile. A manual PROVISIONING_PROFILE_
+      # SPECIFIER override on the command line applies to every target in
+      # the build, so it can't express "this profile for App, that one for
+      # the widget." -allowProvisioningUpdates lets xcodebuild resolve (and
+      # create, if needed) the correct profile per target itself, using the
+      # API key above instead of an interactive Apple ID session — no need
+      # to hand-manage a provisioning profile secret per target.
       - name: Archive
         working-directory: workout-tracker/ios/App
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
           xcodebuild archive \
             -scheme App \
             -destination 'generic/platform=iOS' \
             -archivePath build/App.xcarchive \
             -skipPackagePluginValidation \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$TEAM_ID"
 
-      # NOTE: once the Live Activity widget extension from
-      # ios/MANUAL_SETUP.md is added, it's a second target with its own
-      # bundle ID and needs its own entry in <provisioningProfiles> below
-      # (and its own profile installed above) or this export will fail.
       - name: Export .ipa
         working-directory: workout-tracker/ios/App
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
           cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -111,28 +119,25 @@ jobs:
           <dict>
             <key>method</key><string>${{ env.EXPORT_METHOD }}</string>
             <key>teamID</key><string>$TEAM_ID</string>
-            <key>signingStyle</key><string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>${{ env.APP_ID }}</key><string>$PROFILE_NAME</string>
-            </dict>
+            <key>signingStyle</key><string>automatic</string>
           </dict>
           </plist>
           PLIST
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
             -exportPath build/ipa \
-            -exportOptionsPlist ExportOptions.plist
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
       - name: Upload to TestFlight
         working-directory: workout-tracker/ios/App
         env:
           ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          ASC_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
         run: |
-          mkdir -p ~/.appstoreconnect/private_keys
-          echo "$ASC_KEY_P8_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
           xcrun altool --upload-app \
             -f build/ipa/App.ipa \
             -t ios \
