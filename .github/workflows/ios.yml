@@ -145,6 +145,23 @@ jobs:
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
           printf 'simulator boot (wait, after build)\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
 
+      # AppLogic is a standalone local Swift package (ios/App/AppLogic), not
+      # a target inside App.xcodeproj — xcodebuild can build/test a bare
+      # Package.swift directly, using the product's name as the scheme, with
+      # no Xcode project/workspace involved. This is where native logic
+      # extracted out of the thin App/LiveActivityWidget targets gets real
+      # XCTest coverage; see ios/MANUAL_SETUP.md for why those targets
+      # themselves have no unit test target of their own.
+      - name: Run AppLogic unit tests
+        working-directory: workout-tracker/ios/App/AppLogic
+        run: |
+          t0=$SECONDS
+          xcodebuild test \
+            -scheme AppLogic \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skipPackagePluginValidation
+          printf 'AppLogic xctest\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
+
       - name: Install on the Simulator
         working-directory: workout-tracker/ios/App
         run: |

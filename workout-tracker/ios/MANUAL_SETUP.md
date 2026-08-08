@@ -9,7 +9,7 @@ once (or again if the widget target gets removed/regenerated).
 
 ## Test coverage layers
 
-Three layers exist, each covering something the others can't:
+Four layers exist, each covering something the others can't:
 
 1. **`e2e/native-platform.spec.ts` (Playwright, runs everywhere, no Mac needed).**
    Forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform`
@@ -18,14 +18,27 @@ Three layers exist, each covering something the others can't:
    (`src/native/*`, `notifications.ts`, `workout.ts`, `settings.ts`) calls
    the right plugin methods with the right arguments. Runs in a plain
    browser, so it can't touch actual ActivityKit/UNUserNotificationCenter.
-2. **`ios.yml`'s Simulator smoke test (CI only, no Mac needed).** Boots a
+2. **`AppLogic`'s XCTest suite (CI only, no Mac needed).** `App` and
+   `LiveActivityWidget` are Xcode targets with no unit test target of their
+   own — adding one means editing `App.xcodeproj`'s target graph, which has
+   no Apple-provided CLI (project mutation is GUI-only, or third-party
+   tooling; see step 5 below for why linking a package is a one-time manual
+   step rather than something scripted). `AppLogic` sidesteps that: it's a
+   standalone local Swift package (its own `Package.swift`), and
+   `xcodebuild test -scheme AppLogic` builds/tests it directly with no
+   Xcode project involved. This is where real logic pulled out of the
+   app/widget targets (e.g. `WebViewScrollChrome`, the `MainViewController`
+   scroll-indicator config) gets actual regression coverage, run in
+   `ios.yml` on every push. New Swift logic should go here, not inlined in
+   `App`/`LiveActivityWidget` — see step 5.
+3. **`ios.yml`'s Simulator smoke test (CI only, no Mac needed).** Boots a
    real iOS Simulator, installs the built app, and confirms the WKWebView
    actually loads and runs the web bundle inside the native shell (via a
    console marker in `src/main.ts`) — catching native-shell-level breakage
    (crash on launch, blank WebView, bad bundle) that a browser-only test
    can't see. It doesn't drive the UI, so it can't verify that tapping a
    button actually schedules a notification or starts a Live Activity.
-3. **Manual verification on a real device (see "First run" below).** The
+4. **Manual verification on a real device (see "First run" below).** The
    only way to confirm actual Live Activity rendering and notification
    delivery, since Live Activities don't render in the Simulator at all and
    this repo has no XCUITest target driving on-device UI interaction.
@@ -74,3 +87,26 @@ Signing & Capabilities tab, on the `App` target:
 `npx cap sync ios` (or `bun run cap:sync`) after any dependency change, then
 run on a real device — ActivityKit Live Activities don't render in the
 Simulator.
+
+## 5. Link `AppLogic` into the `App` target
+
+`ios/App/AppLogic` (see "Test coverage layers" above) is a plain local
+Swift package — adding code and tests to it needs no Xcode, but making
+`App` (or `LiveActivityWidget`) able to actually call into it requires
+linking it as a package dependency, which does need Xcode's GUI (Apple's
+CLI has no way to edit an `.xcodeproj`'s target graph). This is a one-time
+step — once linked, anything added to `AppLogic` afterward is usable
+immediately, no further Xcode step needed.
+
+1. Open `ios/App/App.xcworkspace` (or `.xcodeproj`) in Xcode.
+2. File > Add Package Dependencies… > Add Local…, select `ios/App/AppLogic`.
+3. When prompted for which target(s) to add it to, check `App` (and
+   `LiveActivityWidget` too, if the widget needs it).
+4. Build once (⌘B) to confirm it resolves, then commit the resulting
+   `project.pbxproj`/`Package.resolved` changes.
+
+This hasn't been done yet as of this writing — `MainViewController` still
+inlines the scroll-indicator config rather than calling
+`AppLogic.WebViewScrollChrome.hideNativeIndicators(on:)`. Do the link
+above, then update `MainViewController.swift` to call it and delete the
+inline duplicate.
