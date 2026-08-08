@@ -47,6 +47,24 @@ test.describe('Native platform detection', () => {
   });
 });
 
+test.describe('Capacitor iOS zoom config', () => {
+  // The double-tap-zoom-gets-stuck bug (see CAPBridgeViewController.swift's
+  // prepareWebView: `if !configuration.zoomingEnabled { aWebView.scrollView
+  // .delegate = delegationHandler }`) is a Capacitor bridge-wiring issue,
+  // not something reachable from page JS or observable in a
+  // Chromium-driven Playwright browser — there's no real WKWebView here to
+  // assert scroll-view/gesture-recognizer state against, and this project
+  // has no Swift test target. The only thing verifiable outside an actual
+  // Simulator/device run is that the config flag which controls that
+  // wiring is set correctly; regressing this to false (or removing it)
+  // silently reintroduces the bug natively with nothing else here to catch
+  // it. See capacitor.config.ts for the full mechanism writeup.
+  test('ios.zoomEnabled stays true', async () => {
+    const { default: config } = await import('../capacitor.config');
+    expect(config.ios?.zoomEnabled).toBe(true);
+  });
+});
+
 test.describe('Native rest-timer notifications', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {

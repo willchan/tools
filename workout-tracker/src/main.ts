@@ -14,6 +14,9 @@ installGlobalErrorHandlers();
 installSwTimerLogging();
 void checkForOtaUpdate();
 
+// Zoom (double-tap getting stuck with no way to pinch back out) is fixed at
+// the native layer via capacitor.config.ts's ios.zoomEnabled — see the
+// comment there. No JS-side viewport handling needed.
 const app = document.getElementById('app')!;
 
 // Register routes
