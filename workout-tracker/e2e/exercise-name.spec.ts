@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 /**
  * Pure logic behind the human-readable exercise name shown in the Live
  * Activity (see src/native/liveActivity.ts and
- * ios/App/LiveActivityWidget/WorkoutLiveActivityWidget.swift)
+ * ios/App/LiveActivityWidget/LiveActivityWidget.swift)
  * — the workout's TemplateSet only carries exerciseId (a kebab-case slug
  * like "hanging-leg-raise"), so the widget needs this to look up the
  * catalog's display name instead of showing the raw slug.

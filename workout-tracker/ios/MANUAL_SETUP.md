@@ -23,11 +23,14 @@ file dropped into that folder (Swift source, `Assets.xcassets` entries) is
 picked up by the `LiveActivityWidgetExtension` target automatically, with
 no `.pbxproj` editing and no Xcode GUI step. Concretely:
 
-- `WorkoutLiveActivityWidget.swift` in that folder *is* the real,
-  compiled widget UI — edit it directly and commit. (There used to be a
-  separate `ios/WidgetExtensionReference/` copy meant to be hand-pasted
-  into Xcode; that's gone now that the real file lives in the synced
-  folder directly — one less place for the two to drift apart.)
+- `LiveActivityWidget.swift` in that folder *is* the real, compiled widget
+  UI (its `WorkoutLiveActivityWidget` struct is what
+  `LiveActivityWidgetBundle.swift`'s `@main` references) — edit it
+  directly and commit. There was also a separate, uncompiled
+  `ios/WidgetExtensionReference/` copy meant to be hand-pasted into Xcode;
+  it's been removed since it had silently drifted out of sync with this
+  real file and was actively misleading — always edit
+  `LiveActivityWidget.swift` here instead.
 - `Assets.xcassets/LiveActivityIcon.imageset` is the app icon used in the
   Live Activity's lock-screen banner and compact/minimal Dynamic Island —
   same deal, just files in a folder.
@@ -89,8 +92,8 @@ app's beep pattern); it needs to be added to the `App` target's bundle:
 1. File > New > Target… > Widget Extension.
 2. Name it `LiveActivityWidget`, check "Include Live Activity".
 3. Delete the placeholder Live Activity Swift file Xcode generates —
-   `WorkoutLiveActivityWidget.swift` (committed in this folder) replaces it
-   once the target's folder is pointed at this directory.
+   `LiveActivityWidget.swift` (committed in this folder) replaces it once
+   the target's folder is pointed at this directory.
 4. In the Project Navigator, expand `Pods > CapacitorLiveActivity > Shared`
    (or, since this project uses Swift Package Manager, the
    `CapacitorLiveActivity` package's `Shared` group) and copy
