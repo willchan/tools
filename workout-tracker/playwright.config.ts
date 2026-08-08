@@ -5,7 +5,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  workers: process.env.CI ? 2 : undefined,
+  // GitHub-hosted ubuntu-latest runners give public repos 4 vCPUs; match
+  // workers to that so CI doesn't leave half the runner idle. Locally, let
+  // Playwright pick a default based on the dev machine's own core count.
+  workers: process.env.CI ? 4 : undefined,
   reporter: 'html',
   timeout: 15_000,
   expect: {

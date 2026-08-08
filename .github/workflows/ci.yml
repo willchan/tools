@@ -8,13 +8,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     defaults:
       run:
         working-directory: workout-tracker
-
     steps:
       - uses: actions/checkout@v4
 
@@ -31,15 +30,85 @@ jobs:
       - name: Lint
         run: bun run lint
 
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: workout-tracker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('workout-tracker/bun.lock') }}
+
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium webkit
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
 
-      - name: Run Playwright tests
-        run: bunx playwright test
+      - name: Install Playwright OS dependencies only
+        run: bunx playwright install-deps chromium webkit
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+
+      - name: Run Playwright tests (shard ${{ matrix.shard }}/4)
+        run: bunx playwright test --shard=${{ matrix.shard }}/4 --reporter=blob
+
+      - name: Upload blob report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: workout-tracker/blob-report/
+          retention-days: 1
+
+  merge-reports:
+    # Runs even if a shard failed, so a failing run still gets a report; only
+    # skips on cancellation, when there's nothing meaningful to merge.
+    if: ${{ !cancelled() }}
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: workout-tracker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: workout-tracker/all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge into HTML report
+        run: bunx playwright merge-reports --reporter html ./all-blob-reports
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
         with:
           name: playwright-report
           path: workout-tracker/playwright-report/
