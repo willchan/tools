@@ -1,5 +1,10 @@
 # One-time TestFlight signing setup
 
+> **✅ This setup is complete for this repo.** All secrets are configured in GitHub.
+> For the regular deployment workflow, see [`DEPLOY.md`](DEPLOY.md).
+>
+> This document is preserved as reference for anyone forking the repo to build their own version.
+
 Everything here after enrollment is a few clicks in a browser — no Mac
 needed. Claude generated the private key + CSR for step 3 already (sent
 separately, not committed to the repo — a signing private key must never
