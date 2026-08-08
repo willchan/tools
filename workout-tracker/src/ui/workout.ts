@@ -2,16 +2,15 @@ import {
   getState,
   getTemplate,
   getAllTrainingMaxes,
-  putState,
-  putWorkoutLog,
-  putTrainingMax,
   putTimerState,
   getTimerState,
   getSettings,
   getActiveWorkout,
   putActiveWorkout,
+  completeWorkoutAtomic,
+  putTrainingMaxesAtomic,
 } from '../db/database';
-import type { CompletedSet, WorkoutLog, TemplateSet } from '../db/types';
+import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionState } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
 import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex } from '../logic/volume';
@@ -30,14 +29,65 @@ let isResting = false;
 // stack handlers referencing stale, detached DOM.
 let removeVisibilityReconcileHandler: (() => void) | null = null;
 
+/** Does a persisted active-workout record belong to this exact position? */
+function activeWorkoutMatches(activeWorkout: ActiveWorkout, state: ProgressionState): boolean {
+  return (
+    activeWorkout.templateId === state.templateId &&
+    activeWorkout.cycle === state.cycle &&
+    activeWorkout.weekIndex === state.weekIndex &&
+    activeWorkout.dayIndex === state.dayIndex
+  );
+}
+
+/**
+ * Blocks starting a new workout until the user resolves a stuck one for a
+ * *different* day. `activeWorkout` is a single global IndexedDB slot, not
+ * scoped per day — logging the first set of a freshly-started workout would
+ * silently overwrite whatever's sitting there, permanently losing it with no
+ * warning. Renders into `container` and resolves once the user picks.
+ */
+function promptStaleWorkoutConflict(
+  container: HTMLElement,
+  info: { dayName: string; setsLogged: number; startedAt: number; canResume: boolean },
+): Promise<'resume' | 'discard'> {
+  return new Promise((resolve) => {
+    const dateStr = new Date(info.startedAt).toLocaleDateString();
+    // Only offer "Finish it" when the stale workout's day still exists to
+    // resume into (its template/day may have been edited or deleted since).
+    // Otherwise resuming isn't possible, so don't show a button that would
+    // silently discard instead of doing what it says.
+    const bodyText = info.canResume
+      ? `<p>Finish it before starting a new workout.</p>`
+      : `<p>Its template or day has since changed, so it can no longer be resumed.</p>`;
+    const resumeBtnHtml = info.canResume
+      ? `<button id="stale-workout-resume-btn" class="btn btn-primary" data-testid="stale-workout-resume-btn">Finish it</button>`
+      : '';
+    container.innerHTML = `
+      <div class="stale-workout-overlay" data-testid="stale-workout-dialog">
+        <div class="stale-workout-card">
+          <h2>Unfinished Workout</h2>
+          <p>You have an unfinished <strong>${info.dayName}</strong> workout from ${dateStr}
+             with ${info.setsLogged} set${info.setsLogged === 1 ? '' : 's'} logged.</p>
+          ${bodyText}
+          <div class="stale-workout-actions">
+            <button id="stale-workout-discard-btn" class="btn btn-text btn-danger" data-testid="stale-workout-discard-btn">Discard it</button>
+            ${resumeBtnHtml}
+          </div>
+        </div>
+      </div>
+    `;
+    document.getElementById('stale-workout-resume-btn')?.addEventListener('click', () => resolve('resume'));
+    document.getElementById('stale-workout-discard-btn')?.addEventListener('click', () => resolve('discard'));
+  });
+}
+
 export async function renderWorkout(container: HTMLElement): Promise<void> {
-  const state = await getState();
+  let state = await getState();
   if (!state) {
     container.innerHTML = '<p>No workout state found.</p>';
     return;
   }
-
-  const template = await getTemplate(state.templateId);
+  let template = await getTemplate(state.templateId);
   if (!template) {
     container.innerHTML = '<p>Template not found.</p>';
     return;
@@ -47,11 +97,54 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   const tmMap = new Map(tmsRaw.map((tm) => [tm.exerciseId, tm.weight]));
   const settings = await getSettings();
 
-  const week = template.weeks[state.weekIndex];
-  const day = week?.days[state.dayIndex];
+  let week = template.weeks[state.weekIndex];
+  let day = week?.days[state.dayIndex];
   if (!week || !day) {
     container.innerHTML = '<p>Invalid workout day.</p>';
     return;
+  }
+
+  // A stuck activeWorkout for a *different* position must be resolved before
+  // rendering anything else — see promptStaleWorkoutConflict's doc comment.
+  let activeWorkout = await getActiveWorkout();
+  if (activeWorkout && !activeWorkoutMatches(activeWorkout, state)) {
+    const staleTemplate =
+      activeWorkout.templateId === template.id ? template : await getTemplate(activeWorkout.templateId);
+    const staleDay = staleTemplate?.weeks[activeWorkout.weekIndex]?.days[activeWorkout.dayIndex];
+
+    const choice = await promptStaleWorkoutConflict(container, {
+      dayName: staleDay?.name ?? 'a previous workout',
+      setsLogged: activeWorkout.completedSets.length,
+      startedAt: activeWorkout.startedAt,
+      canResume: !!(staleTemplate && staleDay),
+    });
+
+    if (choice === 'resume' && staleTemplate && staleDay) {
+      // Switch this render to the stale workout's own position instead of
+      // the one that was originally requested.
+      state = {
+        ...state,
+        templateId: activeWorkout.templateId,
+        cycle: activeWorkout.cycle,
+        weekIndex: activeWorkout.weekIndex,
+        dayIndex: activeWorkout.dayIndex,
+      };
+      template = staleTemplate;
+      week = staleTemplate.weeks[activeWorkout.weekIndex]!;
+      day = staleDay;
+    } else {
+      // Either the user chose to discard it, or the stale workout points at
+      // a day/template that no longer exists to resume into — either way,
+      // clear it and proceed with the originally-requested workout.
+      await putActiveWorkout(null);
+      await putTimerState(null);
+      await logEvent(
+        'info',
+        'workout abandoned',
+        `${staleDay?.name ?? 'unknown day'} discarded to start ${day.name}`,
+      );
+      activeWorkout = null;
+    }
   }
 
   // Volume rep-total targets are derived from the template (not from
@@ -78,16 +171,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   // the activity payload can be rebuilt on demand without re-reading either.
   let liveActivityRestEndTime: number | null = null;
 
-  // Restore in-progress workout if one exists for this same day
-  const activeWorkout = await getActiveWorkout();
+  // Restore in-progress workout if one exists for this same day (either it
+  // already matched, or the conflict above was just resolved by resuming it).
   let resumingActiveWorkout = false;
-  if (
-    activeWorkout &&
-    activeWorkout.templateId === state.templateId &&
-    activeWorkout.cycle === state.cycle &&
-    activeWorkout.weekIndex === state.weekIndex &&
-    activeWorkout.dayIndex === state.dayIndex
-  ) {
+  if (activeWorkout && activeWorkoutMatches(activeWorkout, state)) {
     completedSets.push(...activeWorkout.completedSets);
     currentSetIndex = activeWorkout.currentSetIndex;
     workoutStartTime = activeWorkout.startedAt;
@@ -700,11 +787,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
     document.getElementById('failure-reset-tm-btn')?.addEventListener('click', async () => {
       const failedExerciseIds = new Set(mainFailed.map((f) => f.exerciseId));
-      for (const exerciseId of failedExerciseIds) {
-        const currentTM = tmMap.get(exerciseId);
-        if (currentTM === undefined) continue;
-        await putTrainingMax({ exerciseId, weight: calculateResetTM(currentTM) });
-      }
+      const tms = [...failedExerciseIds]
+        .map((exerciseId) => {
+          const currentTM = tmMap.get(exerciseId);
+          return currentTM === undefined ? null : { exerciseId, weight: calculateResetTM(currentTM) };
+        })
+        .filter((tm): tm is { exerciseId: string; weight: number } => tm !== null);
+      await putTrainingMaxesAtomic(tms);
       await logEvent(
         'info',
         'training max reset',
@@ -727,30 +816,25 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       completedAt: Date.now(),
     };
 
-    await putWorkoutLog(log);
-
-    // Advance state
     const result = advanceState(state!, template!);
-    await putState(result.newState);
+    const tmBumps = (result.tmBumps ?? []).map((bump) => ({
+      exerciseId: bump.exerciseId,
+      weight: (tmMap.get(bump.exerciseId) ?? 0) + bump.increment,
+    }));
 
-    // Apply TM bumps if new cycle started
-    if (result.tmBumps) {
-      for (const bump of result.tmBumps) {
-        const current = tmMap.get(bump.exerciseId) ?? 0;
-        await putTrainingMax({
-          exerciseId: bump.exerciseId,
-          weight: current + bump.increment,
-        });
-      }
-    }
+    // Log the workout, advance progression, apply any cycle-end TM bumps, and
+    // clear the timer/active-workout records in one atomic transaction.
+    // completeWorkoutAtomic itself guards against regressing progression —
+    // relevant when finishing a workout resumed from a stale activeWorkout
+    // conflict, whose "next" position may be behind wherever progression
+    // has since actually moved (see its doc comment).
+    await completeWorkoutAtomic({ log, candidateState: result.newState, tmBumps });
 
     // Cleanup
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     cancelBackgroundTimerNotification();
     void endWorkoutActivity();
-    await putTimerState(null);
-    await putActiveWorkout(null);
 
     const { mainFailed, bbbFailed } = detectFailures();
     await logEvent(

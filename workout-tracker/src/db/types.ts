@@ -119,4 +119,5 @@ export interface AppData {
   history: WorkoutLog[];
   timerState: TimerState | null;
   settings?: UserSettings;
+  activeWorkout?: ActiveWorkout | null;
 }

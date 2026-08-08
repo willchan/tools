@@ -1030,3 +1030,41 @@ body {
   gap: 12px;
   justify-content: flex-end;
 }
+
+/* Stale active-workout conflict dialog */
+.stale-workout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.stale-workout-card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  width: 90%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stale-workout-card h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.stale-workout-card p {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.stale-workout-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}

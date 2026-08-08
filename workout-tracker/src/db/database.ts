@@ -11,6 +11,7 @@ import type {
   ActiveWorkout,
 } from './types';
 import { getDefaultExercises, getDefault531Template } from './defaults';
+import { isAtOrAfter } from '../logic/progression';
 
 const DB_NAME = 'workout-tracker';
 const DB_VERSION = 2;
@@ -74,20 +75,10 @@ export async function putTemplate(template: Template): Promise<void> {
   await db.put('templates', template);
 }
 
-export async function deleteTemplate(id: string): Promise<void> {
-  const db = await getDB();
-  await db.delete('templates', id);
-}
-
 // --- Training Maxes ---
 export async function getAllTrainingMaxes(): Promise<TrainingMax[]> {
   const db = await getDB();
   return db.getAll('trainingMaxes');
-}
-
-export async function putTrainingMax(tm: TrainingMax): Promise<void> {
-  const db = await getDB();
-  await db.put('trainingMaxes', tm);
 }
 
 export async function getTrainingMax(exerciseId: string): Promise<TrainingMax | undefined> {
@@ -150,6 +141,108 @@ export async function putActiveWorkout(workout: ActiveWorkout | null): Promise<v
   }
 }
 
+// --- Atomic multi-store writes ---
+//
+// Each of these bundles a logically-single user action's writes into one
+// IndexedDB transaction. That matters because a page that's backgrounded and
+// killed mid-flight (routine on iOS PWAs) aborts an in-progress transaction
+// entirely — none of its writes land, including ones "issued" earlier in the
+// same transaction. Doing the same writes as separate transactions (the
+// previous approach) meant an interruption between them could leave the app
+// with, e.g., a workout logged to history but the progression pointer never
+// advanced, or a deleted template with the active-template pointer still
+// referencing it. Bundling them means an interruption leaves the *previous*
+// consistent state fully intact and retryable, instead of a partial one.
+
+/** Data needed to atomically finish a workout: log it, advance progression,
+ *  apply any cycle-end TM bumps, and clear the timer/active-workout records. */
+export interface CompleteWorkoutData {
+  log: WorkoutLog;
+  /** Progression state the just-finished workout would naturally advance to.
+   *  Not written blindly — see completeWorkoutAtomic's doc comment. */
+  candidateState: ProgressionState;
+  /** Training max values tied to `candidateState` representing a cycle
+   *  rollover, if any. Only applied if `candidateState` is actually adopted. */
+  tmBumps?: TrainingMax[];
+}
+
+/**
+ * Finishing a workout normally advances progression by exactly one step from
+ * wherever it was. But a workout can be finished "late" — resumed from a
+ * stale activeWorkout conflict (see workout.ts) — after progression has
+ * already moved further ahead in the meantime (e.g. the user manually
+ * overrode their position, possibly from another tab). Blindly writing
+ * `candidateState` in that case would silently regress progress the user
+ * already made, and applying `tmBumps` alongside it would bump training
+ * maxes for a cycle rollover that isn't actually being recorded.
+ *
+ * So the persisted position is only ever moved to `candidateState` if that's
+ * at or beyond whatever is *actually* currently persisted — read from within
+ * this same transaction, not a snapshot the caller might be holding onto
+ * from earlier in a long workout session, so no concurrent write from
+ * another tab can race between the read and this write either. A different
+ * `templateId` entirely (the user switched their active template while the
+ * now-finishing workout was still open) is never "further along" — there's
+ * no meaningful ordering across two different programs — so it's treated
+ * the same as a regression: the currently active template wins.
+ */
+export async function completeWorkoutAtomic(data: CompleteWorkoutData): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['history', 'state', 'trainingMaxes', 'timer'], 'readwrite');
+  await tx.objectStore('history').put(data.log);
+
+  const current = (await tx.objectStore('state').get('current')) as ProgressionState | undefined;
+  const advances =
+    !current ||
+    (current.templateId === data.candidateState.templateId && isAtOrAfter(data.candidateState, current));
+  await tx.objectStore('state').put(advances ? data.candidateState : current, 'current');
+  if (advances) {
+    for (const tm of data.tmBumps ?? []) {
+      await tx.objectStore('trainingMaxes').put(tm);
+    }
+  }
+
+  await tx.objectStore('state').delete('activeWorkout');
+  await tx.objectStore('timer').delete('current');
+  await tx.done;
+}
+
+/** Delete a template and, if it was the active one, repoint progression state
+ *  at a remaining template — as a single atomic operation. */
+export async function deleteTemplateAtomic(id: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['templates', 'state'], 'readwrite');
+  await tx.objectStore('templates').delete(id);
+  const state = (await tx.objectStore('state').get('current')) as ProgressionState | undefined;
+  if (state?.templateId === id) {
+    const remaining = (await tx.objectStore('templates').getAll()) as Template[];
+    await tx.objectStore('state').put({ ...state, templateId: remaining[0]?.id ?? '' }, 'current');
+  }
+  await tx.done;
+}
+
+/** Save a template and, if provided, activate it — as a single atomic operation. */
+export async function saveTemplateAtomic(template: Template, activateState?: ProgressionState): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['templates', 'state'], 'readwrite');
+  await tx.objectStore('templates').put(template);
+  if (activateState) {
+    await tx.objectStore('state').put(activateState, 'current');
+  }
+  await tx.done;
+}
+
+/** Write a batch of training maxes as a single atomic operation, so a
+ *  multi-lift save (or reset) can't land only some of the lifts. */
+export async function putTrainingMaxesAtomic(tms: TrainingMax[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('trainingMaxes', 'readwrite');
+  for (const tm of tms) {
+    await tx.objectStore('trainingMaxes').put(tm);
+  }
+  await tx.done;
+}
+
 // --- History ---
 export async function getAllHistory(): Promise<WorkoutLog[]> {
   const db = await getDB();
@@ -168,15 +261,17 @@ export async function deleteWorkoutLog(id: string): Promise<void> {
 
 // --- Full Export / Import ---
 export async function exportAll(): Promise<AppData> {
-  const [exercises, templates, state, trainingMaxes, history, timerState, settings] = await Promise.all([
-    getAllExercises(),
-    getAllTemplates(),
-    getState(),
-    getAllTrainingMaxes(),
-    getAllHistory(),
-    getTimerState(),
-    getSettings(),
-  ]);
+  const [exercises, templates, state, trainingMaxes, history, timerState, settings, activeWorkout] =
+    await Promise.all([
+      getAllExercises(),
+      getAllTemplates(),
+      getState(),
+      getAllTrainingMaxes(),
+      getAllHistory(),
+      getTimerState(),
+      getSettings(),
+      getActiveWorkout(),
+    ]);
   return {
     exercises,
     templates,
@@ -185,6 +280,7 @@ export async function exportAll(): Promise<AppData> {
     history,
     timerState,
     settings,
+    activeWorkout,
   };
 }
 
@@ -216,6 +312,9 @@ export async function importAll(data: AppData): Promise<void> {
   }
   if (data.settings) {
     await tx.objectStore('state').put(data.settings, 'settings');
+  }
+  if (data.activeWorkout) {
+    await tx.objectStore('state').put(data.activeWorkout, 'activeWorkout');
   }
 
   await tx.done;
