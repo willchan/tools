@@ -47,6 +47,29 @@ test.describe('Native platform detection', () => {
   });
 });
 
+test.describe('Native viewport zoom lock', () => {
+  test('pinch-zoom is locked only inside the native shell (double-tap-zoom can otherwise get stuck)', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
+    });
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    const content = await page.$eval('meta[name="viewport"]', (el) => el.getAttribute('content'));
+    expect(content).toContain('maximum-scale=1.0');
+    expect(content).toContain('user-scalable=no');
+  });
+
+  test('pinch-zoom stays enabled in the plain web/PWA path (accessibility: WCAG 1.4.4)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    const content = await page.$eval('meta[name="viewport"]', (el) => el.getAttribute('content'));
+    expect(content).not.toContain('maximum-scale');
+    expect(content).not.toContain('user-scalable');
+  });
+});
+
 test.describe('Native rest-timer notifications', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {

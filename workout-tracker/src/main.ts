@@ -9,10 +9,26 @@ import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
 import { installSwTimerLogging } from './ui/notifications';
 import { checkForOtaUpdate } from './native/otaUpdate';
+import { isNativePlatform } from './native/platform';
 
 installGlobalErrorHandlers();
 installSwTimerLogging();
 void checkForOtaUpdate();
+
+// The Capacitor-wrapped iOS WKWebView ships with its pinch gesture
+// recognizer disabled, so a double-tap-to-zoom (still reachable via the
+// permissive viewport below) has no way to be reversed by pinching back
+// out. Lock zoom only inside that native shell — ordinary mobile browser
+// and installed-PWA users keep pinch-to-zoom, which iOS/Android rely on
+// for accessibility (WCAG 1.4.4).
+if (isNativePlatform()) {
+  document
+    .querySelector('meta[name="viewport"]')
+    ?.setAttribute(
+      'content',
+      'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover',
+    );
+}
 
 const app = document.getElementById('app')!;
 
