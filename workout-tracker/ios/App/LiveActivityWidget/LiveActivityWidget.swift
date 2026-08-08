@@ -75,7 +75,12 @@ struct WorkoutLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             let restEndTime = restEndDate(context.state.values["restEndTime"])
 
-            DynamicIsland {
+            // dynamicIsland's closure type is a plain (Context) -> DynamicIsland,
+            // not @ViewBuilder — so once a `let` precedes it, Swift's
+            // single-expression implicit-return no longer applies and this
+            // needs an explicit `return` (unlike the `content:` closure above,
+            // which is @ViewBuilder and allows the same shape without one).
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Text(context.state.values["exerciseName"] ?? "")
                 }
