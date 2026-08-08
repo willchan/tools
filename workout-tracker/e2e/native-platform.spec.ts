@@ -47,35 +47,21 @@ test.describe('Native platform detection', () => {
   });
 });
 
-test.describe('Native viewport zoom lock', () => {
-  // Neither test alone proves the platform-scoping — the JS lock's whole
-  // point is that it applies natively and NOT on the web/PWA path. Both
-  // must pass together for that to be verified; a regression that made the
-  // lock apply unconditionally (see git history: commit 1553220 did
-  // exactly that, globally) would still pass the first test on its own.
-  // (This only exercises the JS-mutated-meta half of the fix. The
-  // MainViewController.swift scroll-view zoom clamp is native-only and
-  // can't be observed from a Chromium-driven Playwright test — see the
-  // comment there for how it backstops this one.)
-  test('pinch-zoom is locked inside the mocked native shell', async ({ page }) => {
-    await page.addInitScript(() => {
-      (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
-    });
-    await page.goto('/');
-    await page.waitForSelector('#app');
-
-    const content = await page.$eval('meta[name="viewport"]', (el) => el.getAttribute('content'));
-    expect(content).toContain('maximum-scale=1.0');
-    expect(content).toContain('user-scalable=no');
-  });
-
-  test('pinch-zoom stays enabled in the plain web/PWA path (accessibility: WCAG 1.4.4)', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('#app');
-
-    const content = await page.$eval('meta[name="viewport"]', (el) => el.getAttribute('content'));
-    expect(content).not.toContain('maximum-scale');
-    expect(content).not.toContain('user-scalable');
+test.describe('Capacitor iOS zoom config', () => {
+  // The double-tap-zoom-gets-stuck bug (see CAPBridgeViewController.swift's
+  // prepareWebView: `if !configuration.zoomingEnabled { aWebView.scrollView
+  // .delegate = delegationHandler }`) is a Capacitor bridge-wiring issue,
+  // not something reachable from page JS or observable in a
+  // Chromium-driven Playwright browser — there's no real WKWebView here to
+  // assert scroll-view/gesture-recognizer state against, and this project
+  // has no Swift test target. The only thing verifiable outside an actual
+  // Simulator/device run is that the config flag which controls that
+  // wiring is set correctly; regressing this to false (or removing it)
+  // silently reintroduces the bug natively with nothing else here to catch
+  // it. See capacitor.config.ts for the full mechanism writeup.
+  test('ios.zoomEnabled stays true', async () => {
+    const { default: config } = await import('../capacitor.config');
+    expect(config.ios?.zoomEnabled).toBe(true);
   });
 });
 

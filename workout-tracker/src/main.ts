@@ -9,33 +9,14 @@ import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
 import { installSwTimerLogging } from './ui/notifications';
 import { checkForOtaUpdate } from './native/otaUpdate';
-import { isNativePlatform } from './native/platform';
 
 installGlobalErrorHandlers();
 installSwTimerLogging();
 void checkForOtaUpdate();
 
-// Capacitor's native WKWebView delegate disables the pinch gesture
-// recognizer the instant ANY zoom begins (scrollViewWillBeginZooming in
-// its WebViewDelegationHandler) and never re-enables it — so a
-// double-tap-to-zoom trips the same one-way disable and leaves pinch dead,
-// with no way to zoom back out. Keeping this page's own viewport pinned to
-// maximum-scale=1.0/user-scalable=no while native stops WKWebView from
-// ever starting a zoom, so that delegate callback never fires.
-// MainViewController.swift additionally clamps the scroll view's zoom
-// range natively, before the page has even loaded, closing the gap
-// between initial parse and this script running. Web/PWA users are left
-// on the permissive viewport — pinch-to-zoom there is real accessibility
-// functionality (WCAG 1.4.4) with no equivalent bug to work around.
-if (isNativePlatform()) {
-  document
-    .querySelector('meta[name="viewport"]')
-    ?.setAttribute(
-      'content',
-      'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover',
-    );
-}
-
+// Zoom (double-tap getting stuck with no way to pinch back out) is fixed at
+// the native layer via capacitor.config.ts's ios.zoomEnabled — see the
+// comment there. No JS-side viewport handling needed.
 const app = document.getElementById('app')!;
 
 // Register routes
