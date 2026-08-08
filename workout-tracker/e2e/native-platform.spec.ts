@@ -48,7 +48,16 @@ test.describe('Native platform detection', () => {
 });
 
 test.describe('Native viewport zoom lock', () => {
-  test('pinch-zoom is locked only inside the native shell (double-tap-zoom can otherwise get stuck)', async ({ page }) => {
+  // Neither test alone proves the platform-scoping — the JS lock's whole
+  // point is that it applies natively and NOT on the web/PWA path. Both
+  // must pass together for that to be verified; a regression that made the
+  // lock apply unconditionally (see git history: commit 1553220 did
+  // exactly that, globally) would still pass the first test on its own.
+  // (This only exercises the JS-mutated-meta half of the fix. The
+  // MainViewController.swift scroll-view zoom clamp is native-only and
+  // can't be observed from a Chromium-driven Playwright test — see the
+  // comment there for how it backstops this one.)
+  test('pinch-zoom is locked inside the mocked native shell', async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
     });

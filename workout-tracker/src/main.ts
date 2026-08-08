@@ -15,12 +15,18 @@ installGlobalErrorHandlers();
 installSwTimerLogging();
 void checkForOtaUpdate();
 
-// The Capacitor-wrapped iOS WKWebView ships with its pinch gesture
-// recognizer disabled, so a double-tap-to-zoom (still reachable via the
-// permissive viewport below) has no way to be reversed by pinching back
-// out. Lock zoom only inside that native shell — ordinary mobile browser
-// and installed-PWA users keep pinch-to-zoom, which iOS/Android rely on
-// for accessibility (WCAG 1.4.4).
+// Capacitor's native WKWebView delegate disables the pinch gesture
+// recognizer the instant ANY zoom begins (scrollViewWillBeginZooming in
+// its WebViewDelegationHandler) and never re-enables it — so a
+// double-tap-to-zoom trips the same one-way disable and leaves pinch dead,
+// with no way to zoom back out. Keeping this page's own viewport pinned to
+// maximum-scale=1.0/user-scalable=no while native stops WKWebView from
+// ever starting a zoom, so that delegate callback never fires.
+// MainViewController.swift additionally clamps the scroll view's zoom
+// range natively, before the page has even loaded, closing the gap
+// between initial parse and this script running. Web/PWA users are left
+// on the permissive viewport — pinch-to-zoom there is real accessibility
+// functionality (WCAG 1.4.4) with no equivalent bug to work around.
 if (isNativePlatform()) {
   document
     .querySelector('meta[name="viewport"]')
