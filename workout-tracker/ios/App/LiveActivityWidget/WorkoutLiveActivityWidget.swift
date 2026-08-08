@@ -1,7 +1,11 @@
-// Reference implementation for the Live Activity widget extension described
-// in ios/MANUAL_SETUP.md. Not part of any Xcode target — Xcode's "Widget
-// Extension" wizard generates the real target and file layout; this file's
-// body is what to paste into the generated `*LiveActivity.swift` file.
+// The Live Activity's widget UI. This lives directly in the widget
+// extension's target folder — LiveActivityWidget/ is a Xcode "file system
+// synchronized group" (see project.pbxproj), so any .swift file dropped in
+// here is picked up by the target automatically, no Xcode project-file
+// editing required. That means this file can be edited and shipped purely
+// through git + the "iOS TestFlight" GitHub Actions workflow
+// (ios-testflight.yml) — no local Xcode needed for day-to-day iteration.
+// (Referenced by LiveActivityWidgetBundle.swift's @main WidgetBundle.)
 //
 // Content-state keys here match src/native/liveActivity.ts's
 // `toContentState()`: exerciseName (a human-readable exercise catalog name,
@@ -12,12 +16,14 @@
 //
 // Every presentation (lock screen, expanded island, compact/minimal island)
 // makes rest-vs-active an explicit state, not just "is there a timer or
-// not": a timer glyph + orange tint while resting, a dumbbell glyph while
+// not": a timer glyph + orange tint while resting, the app icon while
 // active — so a glance at the pill alone tells you which one you're in,
 // even before you've registered whether digits are present.
 //
-// LiveActivityIcon (Assets.xcassets) is the app icon, added to the lock
-// screen banner so it doesn't read as anonymous system text.
+// LiveActivityIcon (Assets.xcassets, in this same target folder) is the app
+// icon — used on the lock screen banner and in place of a generic emoji in
+// the compact/minimal Dynamic Island so the pill reads as *this* app's
+// activity, not a generic system glyph.
 
 import ActivityKit
 import WidgetKit
@@ -25,8 +31,9 @@ import SwiftUI
 
 struct WorkoutLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
-        // GenericAttributes is provided by the capacitor-live-activity plugin —
-        // see ios/MANUAL_SETUP.md step 3 for how to add it to this target.
+        // GenericAttributes is provided by the capacitor-live-activity plugin
+        // — see GenericAttributes.swift in this same folder (copied in from
+        // the plugin's Shared package; see ios/MANUAL_SETUP.md).
         ActivityConfiguration(for: GenericAttributes.self) { context in
             let restEndTime = restEndDate(context.state.values["restEndTime"])
 
@@ -93,7 +100,11 @@ struct WorkoutLiveActivityWidget: Widget {
                     Image(systemName: "timer")
                         .foregroundStyle(.orange)
                 } else {
-                    Text("🏋️")
+                    Image("LiveActivityIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
             } compactTrailing: {
                 if let restEndTime {
@@ -109,7 +120,11 @@ struct WorkoutLiveActivityWidget: Widget {
                     Image(systemName: "timer")
                         .foregroundStyle(.orange)
                 } else {
-                    Text("🏋️")
+                    Image("LiveActivityIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(Circle())
                 }
             }
             .keylineTint(restEndTime != nil ? Color.orange : Color.accentColor)
