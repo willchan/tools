@@ -138,6 +138,14 @@ struct WorkoutLiveActivityWidget: Widget {
 
     private func restEndDate(_ raw: String?) -> Date? {
         guard let raw, let ms = Double(raw), ms > 0 else { return nil }
-        return Date(timeIntervalSince1970: ms / 1000)
+        let date = Date(timeIntervalSince1970: ms / 1000)
+        // Must not return an end time that's already passed: every call site
+        // feeds this straight into `Text(timerInterval: Date.now...date, ...)`,
+        // and SwiftUI's `...` operator traps ("Range requires lowerBound <=
+        // upperBound") once `date <= Date.now`. The countdown can legitimately
+        // reach zero in real time before the next content-state push clears
+        // restEndTime, and any re-render in that window (lock/unlock, Island
+        // expand/collapse, ...) would otherwise crash the widget extension.
+        return date > Date() ? date : nil
     }
 }

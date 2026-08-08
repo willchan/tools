@@ -95,12 +95,14 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     return;
   }
 
-  const tmsRaw = await getAllTrainingMaxes();
+  const [tmsRaw, settings, exercises] = await Promise.all([
+    getAllTrainingMaxes(),
+    getSettings(),
+    // Exercise catalog, for resolving the Live Activity's exerciseName to a
+    // human-readable name (see resolveExerciseName).
+    getAllExercises(),
+  ]);
   const tmMap = new Map(tmsRaw.map((tm) => [tm.exerciseId, tm.weight]));
-  const settings = await getSettings();
-  // Exercise catalog, for resolving the Live Activity's exerciseName to a
-  // human-readable name (see resolveExerciseName).
-  const exercises = await getAllExercises();
 
   let week = template.weeks[state.weekIndex];
   let day = week?.days[state.dayIndex];
@@ -609,7 +611,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const exerciseId = workoutSets[currentSetIndex]?.exerciseId ?? '';
     return {
       dayName: day.name,
-      exerciseName: exerciseId ? resolveExerciseName(exerciseId, exercises) : '',
+      exerciseName: resolveExerciseName(exerciseId, exercises),
       setIndex: Math.min(currentSetIndex + 1, workoutSets.length),
       setTotal: workoutSets.length,
       restEndTime: liveActivityRestEndTime,
