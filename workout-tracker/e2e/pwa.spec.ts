@@ -50,6 +50,7 @@ test.describe('PWA Features', () => {
     expect(data).toHaveProperty('trainingMaxes');
     expect(data).toHaveProperty('history');
     expect(data).toHaveProperty('timerState');
+    expect(data).toHaveProperty('activeWorkout');
     expect(data.exercises.length).toBeGreaterThan(0);
     expect(data.templates.length).toBeGreaterThan(0);
   });
@@ -83,5 +84,31 @@ test.describe('PWA Features', () => {
 
     expect(roundtrip.exerciseCount).toBeGreaterThan(0);
     expect(roundtrip.matches).toBe(true);
+  });
+
+  test('an in-progress workout survives an export/import roundtrip', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await page.click('[data-testid="done-set-btn"]');
+
+    const roundtrip = await page.evaluate(async () => {
+      const { exportAll, importAll, getActiveWorkout } = await import('/src/db/database.ts');
+
+      const original = await exportAll();
+      await importAll(original);
+      const restored = await getActiveWorkout();
+
+      return {
+        exportedHadActiveWorkout: original.activeWorkout !== null && original.activeWorkout !== undefined,
+        exportedCompletedSets: original.activeWorkout?.completedSets.length ?? 0,
+        restoredCompletedSets: restored?.completedSets.length ?? 0,
+      };
+    });
+
+    expect(roundtrip.exportedHadActiveWorkout).toBe(true);
+    expect(roundtrip.exportedCompletedSets).toBe(1);
+    expect(roundtrip.restoredCompletedSets).toBe(1);
   });
 });

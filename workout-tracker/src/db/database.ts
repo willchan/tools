@@ -150,6 +150,77 @@ export async function putActiveWorkout(workout: ActiveWorkout | null): Promise<v
   }
 }
 
+// --- Atomic multi-store writes ---
+//
+// Each of these bundles a logically-single user action's writes into one
+// IndexedDB transaction. That matters because a page that's backgrounded and
+// killed mid-flight (routine on iOS PWAs) aborts an in-progress transaction
+// entirely — none of its writes land, including ones "issued" earlier in the
+// same transaction. Doing the same writes as separate transactions (the
+// previous approach) meant an interruption between them could leave the app
+// with, e.g., a workout logged to history but the progression pointer never
+// advanced, or a deleted template with the active-template pointer still
+// referencing it. Bundling them means an interruption leaves the *previous*
+// consistent state fully intact and retryable, instead of a partial one.
+
+/** Data needed to atomically finish a workout: log it, advance progression,
+ *  apply any cycle-end TM bumps, and clear the timer/active-workout records. */
+export interface CompleteWorkoutData {
+  log: WorkoutLog;
+  newState: ProgressionState;
+  /** Final (already-computed) training max values to write, if any. */
+  tmBumps?: TrainingMax[];
+}
+
+export async function completeWorkoutAtomic(data: CompleteWorkoutData): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['history', 'state', 'trainingMaxes', 'timer'], 'readwrite');
+  await tx.objectStore('history').put(data.log);
+  await tx.objectStore('state').put(data.newState, 'current');
+  await tx.objectStore('state').delete('activeWorkout');
+  await tx.objectStore('timer').delete('current');
+  for (const tm of data.tmBumps ?? []) {
+    await tx.objectStore('trainingMaxes').put(tm);
+  }
+  await tx.done;
+}
+
+/** Delete a template and, if it was the active one, repoint progression state
+ *  at a remaining template — as a single atomic operation. */
+export async function deleteTemplateAtomic(id: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['templates', 'state'], 'readwrite');
+  await tx.objectStore('templates').delete(id);
+  const state = (await tx.objectStore('state').get('current')) as ProgressionState | undefined;
+  if (state?.templateId === id) {
+    const remaining = (await tx.objectStore('templates').getAll()) as Template[];
+    await tx.objectStore('state').put({ ...state, templateId: remaining[0]?.id ?? '' }, 'current');
+  }
+  await tx.done;
+}
+
+/** Save a template and, if provided, activate it — as a single atomic operation. */
+export async function saveTemplateAtomic(template: Template, activateState?: ProgressionState): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['templates', 'state'], 'readwrite');
+  await tx.objectStore('templates').put(template);
+  if (activateState) {
+    await tx.objectStore('state').put(activateState, 'current');
+  }
+  await tx.done;
+}
+
+/** Write a batch of training maxes as a single atomic operation, so a
+ *  multi-lift save (or reset) can't land only some of the lifts. */
+export async function putTrainingMaxesAtomic(tms: TrainingMax[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('trainingMaxes', 'readwrite');
+  for (const tm of tms) {
+    await tx.objectStore('trainingMaxes').put(tm);
+  }
+  await tx.done;
+}
+
 // --- History ---
 export async function getAllHistory(): Promise<WorkoutLog[]> {
   const db = await getDB();
@@ -168,15 +239,17 @@ export async function deleteWorkoutLog(id: string): Promise<void> {
 
 // --- Full Export / Import ---
 export async function exportAll(): Promise<AppData> {
-  const [exercises, templates, state, trainingMaxes, history, timerState, settings] = await Promise.all([
-    getAllExercises(),
-    getAllTemplates(),
-    getState(),
-    getAllTrainingMaxes(),
-    getAllHistory(),
-    getTimerState(),
-    getSettings(),
-  ]);
+  const [exercises, templates, state, trainingMaxes, history, timerState, settings, activeWorkout] =
+    await Promise.all([
+      getAllExercises(),
+      getAllTemplates(),
+      getState(),
+      getAllTrainingMaxes(),
+      getAllHistory(),
+      getTimerState(),
+      getSettings(),
+      getActiveWorkout(),
+    ]);
   return {
     exercises,
     templates,
@@ -185,6 +258,7 @@ export async function exportAll(): Promise<AppData> {
     history,
     timerState,
     settings,
+    activeWorkout,
   };
 }
 
@@ -216,6 +290,9 @@ export async function importAll(data: AppData): Promise<void> {
   }
   if (data.settings) {
     await tx.objectStore('state').put(data.settings, 'settings');
+  }
+  if (data.activeWorkout) {
+    await tx.objectStore('state').put(data.activeWorkout, 'activeWorkout');
   }
 
   await tx.done;

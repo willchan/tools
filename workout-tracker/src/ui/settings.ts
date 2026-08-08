@@ -1,6 +1,6 @@
 import {
   getAllTrainingMaxes,
-  putTrainingMax,
+  putTrainingMaxesAtomic,
   exportAll,
   importAll,
   getAllExercises,
@@ -200,12 +200,13 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
 
   saveTmBtn.addEventListener('click', async () => {
     const inputs = tmForm.querySelectorAll('.tm-input') as NodeListOf<HTMLInputElement>;
-    for (const input of inputs) {
-      await putTrainingMax({
-        exerciseId: input.dataset.exercise!,
-        weight: parseInt(input.value) || 0,
-      });
-    }
+    const tms = Array.from(inputs).map((input) => ({
+      exerciseId: input.dataset.exercise!,
+      weight: parseInt(input.value) || 0,
+    }));
+    // One transaction for the whole batch — previously a loop of separate
+    // writes could land some lifts and silently drop others if interrupted.
+    await putTrainingMaxesAtomic(tms);
     saveTmBtn.textContent = 'Saved!';
     setTimeout(() => {
       saveTmBtn.textContent = 'Save Training Maxes';

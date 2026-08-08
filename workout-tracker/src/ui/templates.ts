@@ -1,4 +1,10 @@
-import { getAllTemplates, getAllExercises, putTemplate, deleteTemplate, getState, putState } from '../db/database';
+import {
+  getAllTemplates,
+  getAllExercises,
+  getState,
+  deleteTemplateAtomic,
+  saveTemplateAtomic,
+} from '../db/database';
 import type { Template, TemplateSet, TemplateDay, Exercise } from '../db/types';
 import { navigate, type Route } from './router';
 import { decorateSettingsNavBadge } from '../logic/logger';
@@ -212,14 +218,13 @@ export async function renderTemplates(container: HTMLElement): Promise<void> {
       const name = templates.find((t) => t.id === id)?.name ?? 'this template';
       if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
 
-      await deleteTemplate(id);
-
-      // If the deleted template was the active one, clear it from state
-      const state = await getState();
-      if (state?.templateId === id) {
-        const remaining = await getAllTemplates();
-        await putState({ ...state, templateId: remaining[0]?.id ?? '' });
-      }
+      // Delete and, if it was the active template, repoint state at a
+      // remaining one — as a single atomic write. Doing these as two
+      // separate writes let an interruption between them leave `state`
+      // pointing at a template that no longer exists, which made the Home
+      // screen fall back to "no template configured" even with other
+      // templates and full history still present.
+      await deleteTemplateAtomic(id);
 
       await renderTemplates(container);
     });
@@ -574,18 +579,16 @@ export async function renderTemplateEdit(
     const nameInput = document.getElementById('template-name') as HTMLInputElement;
     template!.name = nameInput.value;
     template!.cycleLength = template!.weeks.length;
-    await putTemplate(template!);
 
-    // Set as active template if it's the only one or is new
+    // Set as active template if it's the only one or is new. Save + activate
+    // as one atomic write so an interruption can't leave a saved template
+    // that never became the active one.
     const currentState = await getState();
-    if (!currentState || isNew) {
-      await putState({
-        templateId: template!.id,
-        cycle: 1,
-        weekIndex: 0,
-        dayIndex: 0,
-      });
-    }
+    const activateState =
+      !currentState || isNew
+        ? { templateId: template!.id, cycle: 1, weekIndex: 0, dayIndex: 0 }
+        : undefined;
+    await saveTemplateAtomic(template!, activateState);
 
     navigate('templates');
   });
