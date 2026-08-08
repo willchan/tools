@@ -6,6 +6,11 @@
 // Content-state keys here match src/native/liveActivity.ts's
 // `toContentState()`: exerciseName, setProgress ("x/y"), and restEndTime (a
 // stringified epoch-ms timestamp, empty string when not resting).
+//
+// The compact/minimal Dynamic Island presentations swap between showing the
+// set progress (e.g. "2/4") and a live countdown to restEndTime, depending
+// on whether a rest timer is currently running — that's the glanceable pill
+// shown when the app isn't in the foreground.
 
 import ActivityKit
 import WidgetKit
@@ -47,9 +52,20 @@ struct WorkoutLiveActivityWidget: Widget {
             } compactLeading: {
                 Text("🏋️")
             } compactTrailing: {
-                Text(context.state.values["setProgress"] ?? "")
+                if let restEndTime = restEndDate(context.state.values["restEndTime"]) {
+                    Text(timerInterval: Date.now...restEndTime, countsDown: true)
+                        .monospacedDigit()
+                        .frame(width: 42)
+                } else {
+                    Text(context.state.values["setProgress"] ?? "")
+                }
             } minimal: {
-                Text("🏋️")
+                if let restEndTime = restEndDate(context.state.values["restEndTime"]) {
+                    Text(timerInterval: Date.now...restEndTime, countsDown: true)
+                        .monospacedDigit()
+                } else {
+                    Text("🏋️")
+                }
             }
         }
     }

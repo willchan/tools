@@ -49,7 +49,10 @@ it to the app target's bundle.
 3. Delete the placeholder Live Activity Swift file Xcode generates and
    replace its contents with `ios/WidgetExtensionReference/WorkoutLiveActivityWidget.swift`
    (that file documents the content-state keys it expects — they're produced
-   by `src/native/liveActivity.ts`).
+   by `src/native/liveActivity.ts`). If a widget target already exists from a
+   previous setup, re-paste this file's contents whenever it changes upstream
+   — `cap sync` does not touch the widget target, so edits here don't reach
+   the device until you copy them in again and rebuild.
 4. In the Project Navigator, expand `Pods > CapacitorLiveActivity > Shared`
    (or, since this project uses Swift Package Manager, the
    `CapacitorLiveActivity` package's `Shared` group) and copy
