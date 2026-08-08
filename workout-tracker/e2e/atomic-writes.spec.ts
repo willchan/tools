@@ -80,7 +80,7 @@ test.describe('Atomic multi-store writes', () => {
           startedAt: Date.now(),
           completedAt: Date.now(),
         },
-        newState: { ...before!, dayIndex: before!.dayIndex + 1 },
+        candidateState: { ...before!, dayIndex: before!.dayIndex + 1 },
         tmBumps: [{ exerciseId: 'bench', weight: 321 }],
       });
 
@@ -97,6 +97,98 @@ test.describe('Atomic multi-store writes', () => {
     expect(result.state?.dayIndex).toBe(1);
     expect(result.timerState).toBeNull();
     expect(result.activeWorkout).toBeNull();
+  });
+
+  test('completeWorkoutAtomic never regresses progression and suppresses TM bumps when it would', async ({
+    page,
+  }) => {
+    // Regression: finishing a workout that was resumed from a stale
+    // activeWorkout conflict computes its "next" position from wherever that
+    // stuck workout was — which can be *behind* wherever progression already
+    // stood (e.g. the user manually navigated further ahead in the
+    // meantime). The persisted position must never move backward as a side
+    // effect of finishing an old workout, and a TM bump tied to a cycle
+    // rollover that's being discarded must not be applied either — applying
+    // it while not persisting the state that "caused" it would silently
+    // bump training maxes with no corresponding progression change.
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+
+    const result = await page.evaluate(async () => {
+      const { getState, putState, getAllTrainingMaxes, completeWorkoutAtomic } = await import(
+        '/src/db/database.ts'
+      );
+
+      const before = await getState();
+      // Progression already advanced ahead of the workout we're about to
+      // (belatedly) complete — e.g. via a manual override in another tab.
+      await putState({ ...before!, cycle: 2, weekIndex: 0, dayIndex: 0 });
+      const tmsBefore = await getAllTrainingMaxes();
+
+      await completeWorkoutAtomic({
+        log: {
+          id: 'workout-test-no-regress',
+          templateId: before!.templateId,
+          cycle: before!.cycle,
+          weekIndex: before!.weekIndex,
+          dayIndex: before!.dayIndex,
+          dayName: 'Test Day',
+          sets: [],
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+        },
+        // Behind the cycle-2 position already persisted above.
+        candidateState: { ...before!, cycle: 1, weekIndex: 0, dayIndex: 1 },
+        tmBumps: [{ exerciseId: 'bench', weight: 999 }],
+      });
+
+      return { state: await getState(), tmsBefore, tmsAfter: await getAllTrainingMaxes() };
+    });
+
+    expect(result.state).toMatchObject({ cycle: 2, weekIndex: 0, dayIndex: 0 });
+    expect(result.tmsAfter).toEqual(result.tmsBefore);
+  });
+
+  test('completeWorkoutAtomic never overwrites a since-switched-to different template', async ({ page }) => {
+    // Regression: a workout started under one template, finished belatedly
+    // (e.g. resumed from a stale activeWorkout conflict) after the user has
+    // since switched their active template entirely, must not revert that
+    // switch — there's no meaningful "further along" comparison across two
+    // different templates, so the currently active one always wins.
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+
+    const result = await page.evaluate(async () => {
+      const { getState, putTemplate, saveTemplateAtomic, completeWorkoutAtomic } = await import(
+        '/src/db/database.ts'
+      );
+
+      const originalState = await getState();
+      await putTemplate({ id: 'other-template', name: 'Other', weeks: [], cycleLength: 0 });
+      // Switch the active template — a deliberate, more recent choice.
+      const switchedState = { templateId: 'other-template', cycle: 1, weekIndex: 0, dayIndex: 0 };
+      await saveTemplateAtomic({ id: 'other-template', name: 'Other', weeks: [], cycleLength: 0 }, switchedState);
+
+      await completeWorkoutAtomic({
+        log: {
+          id: 'workout-test-different-template',
+          templateId: originalState!.templateId,
+          cycle: originalState!.cycle,
+          weekIndex: originalState!.weekIndex,
+          dayIndex: originalState!.dayIndex,
+          dayName: 'Test Day',
+          sets: [],
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+        },
+        // Belongs to the OLD template, not the one now active.
+        candidateState: { ...originalState!, dayIndex: originalState!.dayIndex + 1 },
+      });
+
+      return { state: await getState(), switchedState };
+    });
+
+    expect(result.state).toEqual(result.switchedState);
   });
 
   test('deleteTemplateAtomic deletes the template and repoints active state together', async ({ page }) => {

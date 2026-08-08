@@ -100,4 +100,69 @@ test.describe('Stale active-workout conflict guard', () => {
     await expect(page.locator('[data-testid="stale-workout-dialog"]')).not.toBeAttached();
     await expect(page.locator('.set-item.completed')).toHaveCount(1);
   });
+
+  test('finishing a stuck workout never regresses progression past where the user has since navigated', async ({
+    page,
+  }) => {
+    // Squat Day (index 0) gets stuck in progress, then the user manually
+    // navigates ahead to OHP Day (index 3) via the day picker — a deliberate,
+    // more recent decision than wherever the stuck workout happened to be.
+    await page.evaluate(async () => {
+      const { getState, putState, putActiveWorkout } = await import('/src/db/database.ts');
+      const state = await getState();
+      await putActiveWorkout({
+        templateId: state!.templateId,
+        cycle: state!.cycle,
+        weekIndex: state!.weekIndex,
+        dayIndex: 0, // Squat Day, stuck with nothing logged yet
+        completedSets: [],
+        currentSetIndex: 0,
+        startedAt: Date.now() - 60_000,
+      });
+      await putState({ ...state!, dayIndex: 3 }); // manually navigated to OHP Day
+    });
+    await page.reload();
+    await page.waitForSelector('#start-workout-btn');
+    await expect(page.locator('.day-name')).toContainText('OHP');
+
+    await page.click('#start-workout-btn');
+    await page.click('[data-testid="stale-workout-resume-btn"]');
+    await page.waitForSelector('.workout-screen');
+    await expect(page.locator('h1')).toHaveText('Squat Day');
+
+    // Finish every set of the resumed Squat Day workout. The done-click
+    // handler asynchronously starts a rest timer (disabling Done until it's
+    // skipped), so an instantaneous isVisible() check on the skip button
+    // right after clicking races that handler; wait for either the skip
+    // button or the complete-workout button to actually appear instead.
+    const completeBtn = page.locator('#complete-workout-btn');
+    const skipBtn = page.locator('#skip-timer-btn');
+    while (!(await completeBtn.isVisible().catch(() => false))) {
+      await page.click('[data-testid="done-set-btn"]');
+      await Promise.race([
+        skipBtn.waitFor({ state: 'visible' }).catch(() => {}),
+        completeBtn.waitFor({ state: 'visible' }).catch(() => {}),
+      ]);
+      if (await skipBtn.isVisible().catch(() => false)) {
+        await skipBtn.click();
+      }
+    }
+    await completeBtn.click();
+
+    // advanceState(Squat) would naturally produce "Bench Day" (index 1) — but
+    // the user's manual position (OHP, index 3) is further along and must win.
+    const finalState = await page.evaluate(async () => {
+      const { getState } = await import('/src/db/database.ts');
+      return getState();
+    });
+    expect(finalState?.dayIndex).toBe(3);
+
+    // The workout itself must still be recorded — only the progression
+    // pointer is protected from regressing, not the historical fact.
+    const history = await page.evaluate(async () => {
+      const { getAllHistory } = await import('/src/db/database.ts');
+      return getAllHistory();
+    });
+    expect(history.some((h) => h.dayName === 'Squat Day')).toBe(true);
+  });
 });

@@ -48,20 +48,30 @@ function activeWorkoutMatches(activeWorkout: ActiveWorkout, state: ProgressionSt
  */
 function promptStaleWorkoutConflict(
   container: HTMLElement,
-  info: { dayName: string; setsLogged: number; startedAt: number },
+  info: { dayName: string; setsLogged: number; startedAt: number; canResume: boolean },
 ): Promise<'resume' | 'discard'> {
   return new Promise((resolve) => {
     const dateStr = new Date(info.startedAt).toLocaleDateString();
+    // Only offer "Finish it" when the stale workout's day still exists to
+    // resume into (its template/day may have been edited or deleted since).
+    // Otherwise resuming isn't possible, so don't show a button that would
+    // silently discard instead of doing what it says.
+    const bodyText = info.canResume
+      ? `<p>Finish it before starting a new workout.</p>`
+      : `<p>Its template or day has since changed, so it can no longer be resumed.</p>`;
+    const resumeBtnHtml = info.canResume
+      ? `<button id="stale-workout-resume-btn" class="btn btn-primary" data-testid="stale-workout-resume-btn">Finish it</button>`
+      : '';
     container.innerHTML = `
       <div class="stale-workout-overlay" data-testid="stale-workout-dialog">
         <div class="stale-workout-card">
           <h2>Unfinished Workout</h2>
           <p>You have an unfinished <strong>${info.dayName}</strong> workout from ${dateStr}
              with ${info.setsLogged} set${info.setsLogged === 1 ? '' : 's'} logged.</p>
-          <p>Finish it before starting a new workout.</p>
+          ${bodyText}
           <div class="stale-workout-actions">
             <button id="stale-workout-discard-btn" class="btn btn-text btn-danger" data-testid="stale-workout-discard-btn">Discard it</button>
-            <button id="stale-workout-resume-btn" class="btn btn-primary" data-testid="stale-workout-resume-btn">Finish it</button>
+            ${resumeBtnHtml}
           </div>
         </div>
       </div>
@@ -77,7 +87,6 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     container.innerHTML = '<p>No workout state found.</p>';
     return;
   }
-
   let template = await getTemplate(state.templateId);
   if (!template) {
     container.innerHTML = '<p>Template not found.</p>';
@@ -107,6 +116,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       dayName: staleDay?.name ?? 'a previous workout',
       setsLogged: activeWorkout.completedSets.length,
       startedAt: activeWorkout.startedAt,
+      canResume: !!(staleTemplate && staleDay),
     });
 
     if (choice === 'resume' && staleTemplate && staleDay) {
@@ -813,10 +823,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     }));
 
     // Log the workout, advance progression, apply any cycle-end TM bumps, and
-    // clear the timer/active-workout records in one atomic transaction — see
-    // completeWorkoutAtomic's doc comment for why this must not be split into
-    // separate writes.
-    await completeWorkoutAtomic({ log, newState: result.newState, tmBumps });
+    // clear the timer/active-workout records in one atomic transaction.
+    // completeWorkoutAtomic itself guards against regressing progression —
+    // relevant when finishing a workout resumed from a stale activeWorkout
+    // conflict, whose "next" position may be behind wherever progression
+    // has since actually moved (see its doc comment).
+    await completeWorkoutAtomic({ log, candidateState: result.newState, tmBumps });
 
     // Cleanup
     releaseWakeLock();

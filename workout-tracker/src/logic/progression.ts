@@ -60,3 +60,14 @@ export function advanceState(
     tmBumps,
   };
 }
+
+/**
+ * Is `a` at or beyond `b` in progression order (cycle, then week, then day)?
+ * Only meaningful within the same template — progression through a different
+ * program isn't comparable, so callers should check `templateId` separately.
+ */
+export function isAtOrAfter(a: ProgressionState, b: ProgressionState): boolean {
+  if (a.cycle !== b.cycle) return a.cycle > b.cycle;
+  if (a.weekIndex !== b.weekIndex) return a.weekIndex > b.weekIndex;
+  return a.dayIndex >= b.dayIndex;
+}

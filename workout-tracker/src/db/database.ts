@@ -11,6 +11,7 @@ import type {
   ActiveWorkout,
 } from './types';
 import { getDefaultExercises, getDefault531Template } from './defaults';
+import { isAtOrAfter } from '../logic/progression';
 
 const DB_NAME = 'workout-tracker';
 const DB_VERSION = 2;
@@ -74,20 +75,10 @@ export async function putTemplate(template: Template): Promise<void> {
   await db.put('templates', template);
 }
 
-export async function deleteTemplate(id: string): Promise<void> {
-  const db = await getDB();
-  await db.delete('templates', id);
-}
-
 // --- Training Maxes ---
 export async function getAllTrainingMaxes(): Promise<TrainingMax[]> {
   const db = await getDB();
   return db.getAll('trainingMaxes');
-}
-
-export async function putTrainingMax(tm: TrainingMax): Promise<void> {
-  const db = await getDB();
-  await db.put('trainingMaxes', tm);
 }
 
 export async function getTrainingMax(exerciseId: string): Promise<TrainingMax | undefined> {
@@ -167,21 +158,52 @@ export async function putActiveWorkout(workout: ActiveWorkout | null): Promise<v
  *  apply any cycle-end TM bumps, and clear the timer/active-workout records. */
 export interface CompleteWorkoutData {
   log: WorkoutLog;
-  newState: ProgressionState;
-  /** Final (already-computed) training max values to write, if any. */
+  /** Progression state the just-finished workout would naturally advance to.
+   *  Not written blindly — see completeWorkoutAtomic's doc comment. */
+  candidateState: ProgressionState;
+  /** Training max values tied to `candidateState` representing a cycle
+   *  rollover, if any. Only applied if `candidateState` is actually adopted. */
   tmBumps?: TrainingMax[];
 }
 
+/**
+ * Finishing a workout normally advances progression by exactly one step from
+ * wherever it was. But a workout can be finished "late" — resumed from a
+ * stale activeWorkout conflict (see workout.ts) — after progression has
+ * already moved further ahead in the meantime (e.g. the user manually
+ * overrode their position, possibly from another tab). Blindly writing
+ * `candidateState` in that case would silently regress progress the user
+ * already made, and applying `tmBumps` alongside it would bump training
+ * maxes for a cycle rollover that isn't actually being recorded.
+ *
+ * So the persisted position is only ever moved to `candidateState` if that's
+ * at or beyond whatever is *actually* currently persisted — read from within
+ * this same transaction, not a snapshot the caller might be holding onto
+ * from earlier in a long workout session, so no concurrent write from
+ * another tab can race between the read and this write either. A different
+ * `templateId` entirely (the user switched their active template while the
+ * now-finishing workout was still open) is never "further along" — there's
+ * no meaningful ordering across two different programs — so it's treated
+ * the same as a regression: the currently active template wins.
+ */
 export async function completeWorkoutAtomic(data: CompleteWorkoutData): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(['history', 'state', 'trainingMaxes', 'timer'], 'readwrite');
   await tx.objectStore('history').put(data.log);
-  await tx.objectStore('state').put(data.newState, 'current');
+
+  const current = (await tx.objectStore('state').get('current')) as ProgressionState | undefined;
+  const advances =
+    !current ||
+    (current.templateId === data.candidateState.templateId && isAtOrAfter(data.candidateState, current));
+  await tx.objectStore('state').put(advances ? data.candidateState : current, 'current');
+  if (advances) {
+    for (const tm of data.tmBumps ?? []) {
+      await tx.objectStore('trainingMaxes').put(tm);
+    }
+  }
+
   await tx.objectStore('state').delete('activeWorkout');
   await tx.objectStore('timer').delete('current');
-  for (const tm of data.tmBumps ?? []) {
-    await tx.objectStore('trainingMaxes').put(tm);
-  }
   await tx.done;
 }
 
