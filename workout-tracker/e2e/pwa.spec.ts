@@ -19,6 +19,37 @@ test.describe('PWA Features', () => {
     await expect(meta).toHaveAttribute('content', '#0f0f0f');
   });
 
+  test('icon links and manifest icons resolve to real, non-empty files', async ({ page, request, baseURL }) => {
+    await page.goto('/');
+
+    // Every <link rel="icon"|"apple-touch-icon"> href must resolve to a real
+    // asset, not 404 or a leftover placeholder stub (see icon-192/512.png,
+    // which once shipped as 1x1 placeholder PNGs under 100 bytes).
+    const iconHrefs = await page
+      .locator('link[rel="icon"], link[rel="apple-touch-icon"]')
+      .evaluateAll((links) => links.map((l) => l.getAttribute('href')));
+    expect(iconHrefs.length).toBeGreaterThan(0);
+
+    for (const href of iconHrefs) {
+      const res = await request.get(new URL(href!, baseURL).toString());
+      expect(res.ok(), `${href} should resolve`).toBe(true);
+      const body = await res.body();
+      expect(body.length, `${href} should not be an empty placeholder`).toBeGreaterThan(500);
+    }
+
+    // manifest.json's icons array must also point to real, non-empty files.
+    const manifestRes = await request.get(new URL('./manifest.json', baseURL).toString());
+    const manifest = await manifestRes.json();
+    expect(manifest.icons.length).toBeGreaterThan(0);
+
+    for (const icon of manifest.icons) {
+      const res = await request.get(new URL(icon.src, baseURL).toString());
+      expect(res.ok(), `${icon.src} should resolve`).toBe(true);
+      const body = await res.body();
+      expect(body.length, `${icon.src} should not be an empty placeholder`).toBeGreaterThan(500);
+    }
+  });
+
   test('registers a service worker', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('#app');
