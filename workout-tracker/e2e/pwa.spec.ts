@@ -19,35 +19,49 @@ test.describe('PWA Features', () => {
     await expect(meta).toHaveAttribute('content', '#0f0f0f');
   });
 
-  test('icon links and manifest icons resolve to real, non-empty files', async ({ page, request, baseURL }) => {
+  test('icon links and manifest icons resolve to real, correctly-sized PNGs', async ({ page, request, baseURL }) => {
     await page.goto('/');
 
-    // Every <link rel="icon"|"apple-touch-icon"> href must resolve to a real
-    // asset, not 404 or a leftover placeholder stub (see icon-192/512.png,
-    // which once shipped as 1x1 placeholder PNGs under 100 bytes).
-    const iconHrefs = await page
-      .locator('link[rel="icon"], link[rel="apple-touch-icon"]')
-      .evaluateAll((links) => links.map((l) => l.getAttribute('href')));
-    expect(iconHrefs.length).toBeGreaterThan(0);
-
-    for (const href of iconHrefs) {
-      const res = await request.get(new URL(href!, baseURL).toString());
-      expect(res.ok(), `${href} should resolve`).toBe(true);
-      const body = await res.body();
-      expect(body.length, `${href} should not be an empty placeholder`).toBeGreaterThan(500);
+    // Reads a PNG's IHDR chunk directly rather than eyeballing byte count —
+    // a compression pass can legitimately shrink a real icon well below any
+    // byte-size threshold, but its pixel dimensions never lie. This is the
+    // exact bug class we're guarding against: icon-192.png/icon-512.png once
+    // shipped as 1x1 placeholder PNGs instead of real artwork.
+    function pngDimensions(buf: Buffer): { width: number; height: number } {
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
     }
 
-    // manifest.json's icons array must also point to real, non-empty files.
+    async function assertRealIcon(href: string, expectedSize: number) {
+      const res = await request.get(new URL(href, baseURL).toString());
+      expect(res.ok(), `${href} should resolve`).toBe(true);
+      const { width, height } = pngDimensions(await res.body());
+      expect(width, `${href} width`).toBe(expectedSize);
+      expect(height, `${href} height`).toBe(expectedSize);
+    }
+
+    // Every <link rel="icon"|"apple-touch-icon"> href must resolve to a PNG
+    // whose dimensions match its declared `sizes` attribute.
+    const links = await page
+      .locator('link[rel="icon"], link[rel="apple-touch-icon"]')
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          href: el.getAttribute('href')!,
+          // apple-touch-icon has no sizes attribute; it's the 180x180 default.
+          size: Number(el.getAttribute('sizes')?.split('x')[0] ?? 180),
+        })),
+      );
+    expect(links.length).toBeGreaterThan(0);
+
+    // manifest.json's icons array must also point to correctly-sized PNGs.
     const manifestRes = await request.get(new URL('./manifest.json', baseURL).toString());
     const manifest = await manifestRes.json();
     expect(manifest.icons.length).toBeGreaterThan(0);
+    const manifestIcons = manifest.icons.map((icon: { src: string; sizes: string }) => ({
+      href: icon.src,
+      size: Number(icon.sizes.split('x')[0]),
+    }));
 
-    for (const icon of manifest.icons) {
-      const res = await request.get(new URL(icon.src, baseURL).toString());
-      expect(res.ok(), `${icon.src} should resolve`).toBe(true);
-      const body = await res.body();
-      expect(body.length, `${icon.src} should not be an empty placeholder`).toBeGreaterThan(500);
-    }
+    await Promise.all([...links, ...manifestIcons].map(({ href, size }) => assertRealIcon(href, size)));
   });
 
   test('registers a service worker', async ({ page }) => {
