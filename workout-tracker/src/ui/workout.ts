@@ -2,6 +2,7 @@ import {
   getState,
   getTemplate,
   getAllTrainingMaxes,
+  getAllExercises,
   putTimerState,
   getTimerState,
   getSettings,
@@ -15,6 +16,7 @@ import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM
 import { advanceState } from '../logic/progression';
 import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
+import { resolveExerciseName } from '../logic/exerciseName';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
 import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification, primeAudioContext } from './notifications';
@@ -96,6 +98,9 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   const tmsRaw = await getAllTrainingMaxes();
   const tmMap = new Map(tmsRaw.map((tm) => [tm.exerciseId, tm.weight]));
   const settings = await getSettings();
+  // Exercise catalog, for resolving the Live Activity's exerciseName to a
+  // human-readable name (see resolveExerciseName).
+  const exercises = await getAllExercises();
 
   let week = template.weeks[state.weekIndex];
   let day = week?.days[state.dayIndex];
@@ -601,9 +606,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   }
 
   function liveActivityState() {
+    const exerciseId = workoutSets[currentSetIndex]?.exerciseId ?? '';
     return {
       dayName: day.name,
-      exerciseName: workoutSets[currentSetIndex]?.exerciseId ?? '',
+      exerciseName: exerciseId ? resolveExerciseName(exerciseId, exercises) : '',
       setIndex: Math.min(currentSetIndex + 1, workoutSets.length),
       setTotal: workoutSets.length,
       restEndTime: liveActivityRestEndTime,
