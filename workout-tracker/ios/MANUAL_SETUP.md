@@ -1,4 +1,6 @@
-# One-time Xcode setup
+# One-time Xcode setup (Optional — for Live Activity Widget)
+
+> **For regular TestFlight deployments, see [`DEPLOY.md`](DEPLOY.md)** — this doc is only needed if adding the Live Activity widget extension.
 
 Everything else in `ios/` is generated/maintained by `bun run cap:sync` and
 builds headlessly in `.github/workflows/ios.yml` on a GitHub-hosted macOS
