@@ -54,6 +54,7 @@ test.describe('PWA Features', () => {
 
     // manifest.json's icons array must also point to correctly-sized PNGs.
     const manifestRes = await request.get(new URL('./manifest.json', baseURL).toString());
+    expect(manifestRes.ok(), 'manifest.json should resolve').toBe(true);
     const manifest = await manifestRes.json();
     expect(manifest.icons.length).toBeGreaterThan(0);
     const manifestIcons = manifest.icons.map((icon: { src: string; sizes: string }) => ({
