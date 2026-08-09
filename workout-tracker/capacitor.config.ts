@@ -5,7 +5,20 @@ const config: CapacitorConfig = {
   appName: 'Workout Tracker',
   webDir: 'dist',
   ios: {
-    contentInset: 'automatic',
+    // 'never' (Capacitor's own default, set explicitly here as a guard
+    // against that default ever changing) so UIKit never auto-adjusts the
+    // WKWebView's scrollView.contentInset for the notch/home indicator.
+    // 'automatic' sounds like the safer choice, but it makes UIKit apply
+    // the safe-area adjustment at the native layer — and WebKit responds by
+    // reporting env(safe-area-inset-*) as 0 to the page, to avoid the inset
+    // being applied twice. This app's entire safe-area strategy (.app-header,
+    // .rest-timer, .bottom-nav, .failure-sheet-card in style.css) is CSS-side,
+    // built on env(safe-area-inset-*) resolving to the real device value —
+    // 'automatic' silently breaks all of it. Caught by
+    // AppUITests/SafeAreaUITests.swift's testHeaderTitleClearsTheTopSafeArea
+    // failing on a real notched Simulator (header title at y=26, i.e. the
+    // pre-fix position) despite the CSS fix being in place and correct.
+    contentInset: 'never',
     // Capacitor's default (false) wires its own WebViewDelegationHandler in
     // as the WKWebView's UIScrollView delegate specifically to police zoom
     // (see CAPBridgeViewController.swift's prepareWebView: `if

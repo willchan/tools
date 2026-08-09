@@ -55,6 +55,22 @@ final class SafeAreaUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
+        // Wait for the header title first, same as the other test above,
+        // rather than querying the nav button immediately after launch: on
+        // a cold launch WKWebView's accessibility bridge can take a while
+        // to finish exposing the DOM as native elements, and interactive
+        // controls (buttons) have lagged noticeably behind simple static
+        // text in practice — querying app.buttons["Home"] as the very first
+        // lookup timed out even though the button was on screen the whole
+        // time. Anchoring on the title first (which the other test proves
+        // resolves reliably) gives the bridge more time to settle before we
+        // ask it about anything interactive.
+        let title = app.staticTexts["Workout Tracker"]
+        XCTAssertTrue(
+            title.waitForExistence(timeout: 30),
+            "header title never appeared — the web bundle may not have loaded"
+        )
+
         // Any of the four nav buttons' accessibility labels works as an
         // anchor for the bottom nav row; "Home" is always present and active
         // on launch.
