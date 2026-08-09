@@ -377,3 +377,119 @@ jobs:
             awk -F'\t' '{ total += $2; printf "| %s | %s |\n", $1, $2 }
                         END { printf "| **measured total** | **%d** |\n", total }' "$TIMINGS"
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  ui-test-safe-area:
+    # Ground-truth backstop for env(safe-area-inset-*) handling — see
+    # workout-tracker/e2e/safe-area.spec.ts and ios/MANUAL_SETUP.md's "Test
+    # coverage layers". Playwright can only prove the app's CSS *responds
+    # correctly* to a mocked inset value (Chromium/WebKit never resolve
+    # env(safe-area-inset-*) to anything but 0 outside a real WKWebView);
+    # this job proves the compiled app running on a real notched/
+    # Dynamic-Island Simulator actually *reports* a non-zero inset and the
+    # header clears it.
+    #
+    # A separate job rather than a step in simulator-build above because it
+    # needs a specific device: simulator-build's "first available iOS
+    # device" pick isn't guaranteed to be notched (a runner's default
+    # runtime can include non-notched models like iPhone SE), so this job
+    # boots an explicitly pinned notched/Dynamic-Island model instead.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: workout-tracker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Preference order: newer Pro models first (guaranteed Dynamic
+      # Island), falling back to older notched-but-no-Island models: any of
+      # these has enough top inset to distinguish the pre-fix layout (header
+      # padding-top fixed at 16px) from the fix (header padding-top also
+      # claims env(safe-area-inset-top)). Errors out rather than silently
+      # falling back to a non-notched device (e.g. iPhone SE), which would
+      # make SafeAreaUITests pass regardless of whether the fix is present.
+      - name: Boot a notched/Dynamic-Island iOS Simulator
+        id: sim
+        run: |
+          CANDIDATES=(
+            "iPhone 17 Pro Max" "iPhone 17 Pro" "iPhone 17" "iPhone Air"
+            "iPhone 16 Pro Max" "iPhone 16 Pro" "iPhone 16" "iPhone 16 Plus" "iPhone 16e"
+            "iPhone 15 Pro Max" "iPhone 15 Pro"
+          )
+          DEVICES_JSON=$(xcrun simctl list devices available -j)
+          UDID=""
+          NAME=""
+          for candidate in "${CANDIDATES[@]}"; do
+            FOUND_UDID=$(echo "$DEVICES_JSON" | jq -r --arg name "$candidate" '
+              .devices | to_entries[] | select(.key | contains("iOS")) | .value[]
+              | select(.name == $name) | .udid
+            ' | head -1)
+            if [ -n "$FOUND_UDID" ]; then
+              UDID="$FOUND_UDID"
+              NAME="$candidate"
+              break
+            fi
+          done
+          if [ -z "$UDID" ]; then
+            echo "::error::No notched/Dynamic-Island Simulator device found among: ${CANDIDATES[*]}"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using $NAME ($UDID)"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build web bundle
+        run: bun run build
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Xcode version
+        id: xcode
+        run: echo "version=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      # Same rationale as simulator-build's DerivedData cache: the build
+      # compiles seven SPM packages from source, which dominates wall time.
+      # A distinct path/key (rather than sharing simulator-build's) because
+      # a `-scheme AppUITests` test run and a `-scheme App` build produce
+      # different derived data layouts, and the two jobs run on separate
+      # runners in parallel so a shared key would just race, not share.
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: workout-tracker/ios/App/build-uitest
+          key: ios-deriveddata-uitest-${{ steps.xcode.outputs.version }}-${{ hashFiles('workout-tracker/bun.lock', 'workout-tracker/ios/App/CapApp-SPM/Package.swift', 'workout-tracker/ios/App/App.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ios-deriveddata-uitest-${{ steps.xcode.outputs.version }}-
+
+      - name: Wait for the Simulator to finish booting
+        run: xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+
+      - name: Run AppUITests (safe-area ground truth)
+        working-directory: workout-tracker/ios/App
+        run: |
+          # Same defensive rm as simulator-build's "Build for the Simulator"
+          # step, and for the same reason: a cache-restored DerivedData is
+          # safe to reuse for compiled objects and package checkouts, but
+          # not for a previous run's built products — this job exists
+          # specifically to catch a safe-area CSS regression, so silently
+          # testing a stale App.app/test runner instead of rebuilding
+          # against the current web bundle would make it an ineffective
+          # ground-truth backstop.
+          rm -rf build-uitest/Build/Products/Debug-iphonesimulator/App.app
+          rm -rf build-uitest/Build/Products/Debug-iphonesimulator/AppUITests-Runner.app
+          xcodebuild test \
+            -scheme AppUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skipPackagePluginValidation \
+            -derivedDataPath build-uitest \
+            CODE_SIGNING_ALLOWED=NO

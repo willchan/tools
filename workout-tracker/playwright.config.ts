@@ -24,6 +24,7 @@ const crossProjectSpecs = [
   'rest-timer-visibility.spec.ts',
   'workout.spec.ts',
   'home.spec.ts',
+  'safe-area.spec.ts',
   'completed-days.spec.ts',
   'settings.spec.ts',
   'templates.spec.ts',
