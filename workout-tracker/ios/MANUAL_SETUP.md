@@ -85,30 +85,6 @@ Four layers exist, each covering something the others can't:
    to confirm actual Live Activity rendering and notification delivery,
    for the reasons above.
 
-## Link `AppLogic` into the `App` target
-
-Unlike the steps in "Reference" below, this one **hasn't been done yet** —
-it's a pending action, not a historical record.
-
-`ios/App/AppLogic` (see "Test coverage layers" above) is a plain local
-Swift package — adding code and tests to it needs no Xcode, but making
-`App` (or `LiveActivityWidget`) able to actually call into it requires
-linking it as a package dependency, which does need Xcode's GUI (Apple's
-CLI has no way to edit an `.xcodeproj`'s target graph). This is a one-time
-step — once linked, anything added to `AppLogic` afterward is usable
-immediately, no further Xcode step needed.
-
-1. Open `ios/App/App.xcworkspace` (or `.xcodeproj`) in Xcode.
-2. File > Add Package Dependencies… > Add Local…, select `ios/App/AppLogic`.
-3. When prompted for which target(s) to add it to, check `App` (and
-   `LiveActivityWidget` too, if the widget needs it).
-4. Build once (⌘B) to confirm it resolves, then commit the resulting
-   `project.pbxproj`/`Package.resolved` changes.
-
-Once linked, `MainViewController` should be switched over to call
-`AppLogic.WebViewScrollChrome.hideNativeIndicators(on:)` instead of
-inlining the scroll-indicator config, and the duplicate deleted.
-
 ## Reference: how the one-time setup was done
 
 Only relevant if the widget target or these resource entries need to be
@@ -152,3 +128,22 @@ Signing & Capabilities tab, on the `App` target:
 
 (`NSSupportsLiveActivities` and `UIBackgroundModes: fetch` are already set
 in `Info.plist`.)
+
+### Link `AppLogic` into the `App` target
+
+`ios/App/AppLogic` (see "Test coverage layers" above) is a plain local
+Swift package — adding code and tests to it needs no Xcode, but making
+`App` (or `LiveActivityWidget`) able to actually call into it required
+linking it as a package dependency once, which did need Xcode's GUI
+(Apple's CLI has no way to edit an `.xcodeproj`'s target graph). Already
+done — `MainViewController` calls
+`AppLogic.WebViewScrollChrome.hideNativeIndicators(on:)`. Steps below are
+for reference if the link ever needs to be redone (e.g. after a
+`project.pbxproj` regeneration):
+
+1. Open `ios/App/App.xcworkspace` (or `.xcodeproj`) in Xcode.
+2. File > Add Package Dependencies… > Add Local…, select `ios/App/AppLogic`.
+3. When prompted for which target(s) to add it to, check `App` (and
+   `LiveActivityWidget` too, if the widget needs it).
+4. Build once (⌘B) to confirm it resolves, then commit the resulting
+   `project.pbxproj`/`Package.resolved` changes.
