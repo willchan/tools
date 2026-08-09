@@ -121,7 +121,7 @@ struct WorkoutLiveActivityWidget: Widget {
                     Text(context.state.values["setProgress"] ?? "")
                 }
             } minimal: {
-                if let restEndTime {
+                if restEndTime != nil {
                     Image(systemName: "timer")
                         .foregroundStyle(.orange)
                 } else {
