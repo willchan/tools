@@ -16,14 +16,21 @@
 //
 // Every presentation (lock screen, expanded island, compact/minimal island)
 // makes rest-vs-active an explicit state, not just "is there a timer or
-// not": a timer glyph + orange tint while resting, the app icon while
-// active — so a glance at the pill alone tells you which one you're in,
+// not": orange tint while resting vs. the accent color while active, plus
+// (see brandedIcon below) a small badge on the app icon itself while
+// resting — so a glance at the pill alone tells you which one you're in,
 // even before you've registered whether digits are present.
 //
 // LiveActivityIcon (Assets.xcassets, in this same target folder) is the app
-// icon — used on the lock screen banner and in place of a generic emoji in
-// the compact/minimal Dynamic Island so the pill reads as *this* app's
-// activity, not a generic system glyph.
+// icon. It's shown everywhere this widget renders an icon — lock screen
+// banner, expanded island, and compact/minimal island — in *both* the
+// active and resting states, so the pill always reads as *this* app's
+// activity rather than a generic system glyph a glance could mistake for
+// any other running timer (Clock app, another app's Live Activity, ...).
+// brandedIcon() overlays a small orange timer badge on top of it while
+// resting, rather than swapping the icon out for a bare SF Symbol, so
+// app identity and rest-vs-active state are both visible at once even in
+// the compact/minimal island's single small glyph slot.
 
 import ActivityKit
 import WidgetKit
@@ -101,16 +108,7 @@ struct WorkoutLiveActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                if restEndTime != nil {
-                    Image(systemName: "timer")
-                        .foregroundStyle(.orange)
-                } else {
-                    Image("LiveActivityIcon")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 20, height: 20)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
+                brandedIcon(size: 20, cornerRadius: 5, isResting: restEndTime != nil)
             } compactTrailing: {
                 if let restEndTime {
                     Text(timerInterval: Date.now...restEndTime, countsDown: true)
@@ -121,18 +119,39 @@ struct WorkoutLiveActivityWidget: Widget {
                     Text(context.state.values["setProgress"] ?? "")
                 }
             } minimal: {
-                if restEndTime != nil {
-                    Image(systemName: "timer")
-                        .foregroundStyle(.orange)
-                } else {
-                    Image("LiveActivityIcon")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(Circle())
-                }
+                brandedIcon(size: 18, cornerRadius: nil, isResting: restEndTime != nil)
             }
             .keylineTint(restEndTime != nil ? Color.orange : Color.accentColor)
+        }
+    }
+
+    // The app icon for the compact/minimal Dynamic Island, badged with a
+    // small orange timer glyph while resting. `size` drives both the icon's
+    // frame and the badge's proportions, so callers just pick one number per
+    // slot. `cornerRadius` selects the clip shape: a rounded square (compact
+    // leading slot, matching the app's normal icon shape) when non-nil, a
+    // circle (minimal slot, which iOS always renders circular) when nil.
+    private func brandedIcon(size: CGFloat, cornerRadius: CGFloat?, isResting: Bool) -> some View {
+        let icon = Image("LiveActivityIcon")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+
+        return Group {
+            if let cornerRadius {
+                icon.clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            } else {
+                icon.clipShape(Circle())
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if isResting {
+                Image(systemName: "timer")
+                    .font(.system(size: size * 0.4, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(size * 0.08)
+                    .background(Circle().fill(.orange))
+            }
         }
     }
 
