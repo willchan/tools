@@ -635,6 +635,19 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     if (doneBtn) doneBtn.disabled = disabled;
   }
 
+  // fireTimerNotification() must run before cancelBackgroundTimerNotification()
+  // — it's what actually notifies the SW (via TIMER_DONE, deduped against its
+  // own setTimeout) that this timer is done. Cancelling first would race: if
+  // the SW's setTimeout hadn't fired yet, cancelling it here would silence the
+  // only pending trigger before TIMER_DONE arrives to replace it. See
+  // notifications.ts's fireTimerNotification. Centralized here (rather than
+  // duplicated at each expiry call site) so this ordering can't be broken by
+  // fixing it in one place and not another.
+  function notifyTimerExpired() {
+    fireTimerNotification();
+    cancelBackgroundTimerNotification();
+  }
+
   async function startRestTimer(restSeconds = settings.restTimerSeconds) {
     // Cancel any stale "Time's Up!" auto-dismiss from a previous expired timer.
     if (timerExpiredTimeout !== null) {
@@ -685,14 +698,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         await putTimerState(null);
         setDoneButtonDisabled(false);
         syncLiveActivity(null);
-        // fireTimerNotification() must run before the cancel below — it's
-        // what actually notifies the SW (via TIMER_DONE, deduped against its
-        // own setTimeout) that this timer is done. Cancelling first would
-        // race: if the SW's setTimeout hadn't fired yet, cancelling it here
-        // would silence the only pending trigger before TIMER_DONE arrives
-        // to replace it. See notifications.ts's fireTimerNotification.
-        fireTimerNotification();
-        cancelBackgroundTimerNotification();
+        notifyTimerExpired();
         showTimerExpired(timerEl);
       }
     };
@@ -946,10 +952,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       await putTimerState(null);
       setDoneButtonDisabled(false);
       syncLiveActivity(null);
-      // See the matching comment in startRestTimer's updateTimer: notify
-      // before cancelling, not after.
-      fireTimerNotification();
-      cancelBackgroundTimerNotification();
+      notifyTimerExpired();
       showTimerExpired(timerEl);
     })();
   };
@@ -984,17 +987,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           await putTimerState(null);
           setDoneButtonDisabled(false);
           syncLiveActivity(null);
-          // See the matching comment in startRestTimer's updateTimer: notify
-          // before cancelling, not after.
-          fireTimerNotification();
-          cancelBackgroundTimerNotification();
+          notifyTimerExpired();
           showTimerExpired(timerEl);
         }
       }, 250);
     } else {
       await putTimerState(null);
-      fireTimerNotification();
-      cancelBackgroundTimerNotification();
+      notifyTimerExpired();
       timerEl.classList.add('hidden');
     }
   }
