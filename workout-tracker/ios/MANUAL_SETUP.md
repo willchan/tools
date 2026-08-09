@@ -196,6 +196,23 @@ ui_test_target.build_configurations.each do |config|
     'TEST_TARGET_NAME' => 'App' # the "Target to be Tested" relationship
   )
 end
+
+# `new_target(:ui_test_bundle, ...)` also auto-adds a Foundation.framework
+# link with a hardcoded absolute SDK path (inconsistent with every other
+# framework reference in this project, which are SDKROOT-relative, and
+# liable to break the build outright) — a real UI-testing bundle doesn't
+# need it linked at all, so strip it back out.
+foundation_build_file = ui_test_target.frameworks_build_phase.files.find do |f|
+  f.file_ref&.display_name == 'Foundation.framework'
+end
+if foundation_build_file
+  foundation_ref = foundation_build_file.file_ref
+  parent_group = foundation_ref.parent
+  foundation_build_file.remove_from_project
+  foundation_ref.remove_from_project
+  parent_group.remove_from_project if parent_group.children.empty?
+end
+
 project.save
 ```
 

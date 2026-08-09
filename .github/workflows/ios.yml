@@ -477,6 +477,16 @@ jobs:
       - name: Run AppUITests (safe-area ground truth)
         working-directory: workout-tracker/ios/App
         run: |
+          # Same defensive rm as simulator-build's "Build for the Simulator"
+          # step, and for the same reason: a cache-restored DerivedData is
+          # safe to reuse for compiled objects and package checkouts, but
+          # not for a previous run's built products — this job exists
+          # specifically to catch a safe-area CSS regression, so silently
+          # testing a stale App.app/test runner instead of rebuilding
+          # against the current web bundle would make it an ineffective
+          # ground-truth backstop.
+          rm -rf build-uitest/Build/Products/Debug-iphonesimulator/App.app
+          rm -rf build-uitest/Build/Products/Debug-iphonesimulator/AppUITests-Runner.app
           xcodebuild test \
             -scheme AppUITests \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
