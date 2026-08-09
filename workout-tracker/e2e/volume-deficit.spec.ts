@@ -245,6 +245,25 @@ test.describe('Volume deficit — workout flow', () => {
     await expect(page.locator('.set-item')).toHaveCount(14);
   });
 
+  test('running deficit is visible on ordinary (non-bonus) sets in a volume group, not just bonus sets', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1: log 6/10. Total so far = 6/50.
+    await logSetWithReps(page, 6, 10);
+
+    // BBB 2 is now current and isn't a bonus set — the deficit should still
+    // show, so a shortfall is visible well before the group's originally
+    // scheduled sets run out and a bonus set gets appended.
+    const current = page.locator('.set-item.current');
+    await expect(current).not.toHaveAttribute('data-bonus', 'true');
+    const deficit = current.locator('[data-testid="set-deficit"]');
+    await expect(deficit).toContainText('6/50');
+    await expect(deficit).toContainText('44 to go');
+
+    // The still-upcoming BBB 3 (not yet current) should show it too.
+    const upcoming = page.locator('.set-item').nth(5);
+    await expect(upcoming.locator('[data-testid="set-deficit"]')).toContainText('6/50');
+  });
+
   test('missing reps in the last BBB set adds a bonus set at original reps', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1-4 at full

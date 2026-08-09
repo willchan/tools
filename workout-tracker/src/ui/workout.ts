@@ -273,12 +273,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (set.isAmrap) repsDisplay += '+';
       if (set.isBonus) repsDisplay += ' (bonus)';
 
+      // Shown on every set in a volume group (not just bonus sets) — once a
+      // set falls short, the running total lets you tell how much you still
+      // owe well before you reach the make-up bonus sets at the end.
       let deficitDisplay = '';
-      if (set.isBonus) {
-        const groupKey = getVolumeGroupKey(set);
-        const progress = groupKey
-          ? computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups)
-          : null;
+      const groupKey = getVolumeGroupKey(set);
+      if (groupKey) {
+        const progress = computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups);
         if (progress) {
           const remaining = Math.max(0, progress.target - progress.cumulative);
           deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
