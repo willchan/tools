@@ -91,7 +91,9 @@ cd workout-tracker && bun run cap:sync       # build + `cap sync ios`
 
 ### Native code test coverage
 
-`e2e/native-platform.spec.ts` covers the native branches added above — it forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform` (Capacitor's own supported override) and asserts each plugin call, using the real "web" fallback implementations already in each installed package rather than hand-rolled mocks. This runs as part of the normal Playwright suite (no Mac needed) and catches wiring regressions (wrong arguments, a call site removed, a missing await), but can't verify real ActivityKit/UNUserNotificationCenter behavior — see `ios/MANUAL_SETUP.md` for what each of the three test layers (Playwright wiring tests, the CI Simulator smoke test, manual on-device verification) does and doesn't cover.
+`e2e/native-platform.spec.ts` covers the native branches added above — it forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform` (Capacitor's own supported override) and asserts each plugin call, using the real "web" fallback implementations already in each installed package rather than hand-rolled mocks. This runs as part of the normal Playwright suite (no Mac needed) and catches wiring regressions (wrong arguments, a call site removed, a missing await), but can't verify real ActivityKit/UNUserNotificationCenter behavior.
+
+The Swift side (`ios/App/App`, `ios/App/LiveActivityWidget`) has no unit test target of its own — Apple's CLI has no way to add one to an `.xcodeproj` without Xcode's GUI. Instead, real Swift logic lives in `ios/App/AppLogic`, a standalone local Swift package with its own XCTest suite, tested via `xcodebuild test -scheme AppLogic` directly against a bare `Package.swift` (no Xcode project needed) — see `ios/MANUAL_SETUP.md` for what each of the four test layers (Playwright wiring tests, `AppLogic`'s XCTest suite, the CI Simulator smoke test, manual on-device verification) does and doesn't cover, and how to add a package dependency to the `App` target.
 
 ## PWA Mechanics
 
