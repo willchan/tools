@@ -17,7 +17,7 @@
 // Every presentation (lock screen, expanded island, compact/minimal island)
 // makes rest-vs-active an explicit state, not just "is there a timer or
 // not": orange tint while resting vs. the accent color while active, plus
-// (see brandedIcon below) a small badge on the app icon itself while
+// (see brandedIcon below) an orange ring around the app icon itself while
 // resting — so a glance at the pill alone tells you which one you're in,
 // even before you've registered whether digits are present.
 //
@@ -27,10 +27,12 @@
 // active and resting states, so the pill always reads as *this* app's
 // activity rather than a generic system glyph a glance could mistake for
 // any other running timer (Clock app, another app's Live Activity, ...).
-// brandedIcon() overlays a small orange timer badge on top of it while
-// resting, rather than swapping the icon out for a bare SF Symbol, so
-// app identity and rest-vs-active state are both visible at once even in
-// the compact/minimal island's single small glyph slot.
+// brandedIcon() draws a ring around it while resting rather than swapping
+// the icon out for a bare SF Symbol (or overlaying a small badge glyph —
+// illegible at this scale, and clipped by the system's automatic circular
+// mask on the `minimal` presentation), so app identity and rest-vs-active
+// state are both visible at once even in the compact/minimal island's
+// single small glyph slot.
 
 import ActivityKit
 import WidgetKit
@@ -125,32 +127,37 @@ struct WorkoutLiveActivityWidget: Widget {
         }
     }
 
-    // The app icon for the compact/minimal Dynamic Island, badged with a
-    // small orange timer glyph while resting. `size` drives both the icon's
-    // frame and the badge's proportions, so callers just pick one number per
-    // slot. `cornerRadius` selects the clip shape: a rounded square (compact
-    // leading slot, matching the app's normal icon shape) when non-nil, a
-    // circle (minimal slot, which iOS always renders circular) when nil.
+    // The app icon for the compact/minimal Dynamic Island, ringed in orange
+    // while resting. `size` drives both the icon's frame and the ring's
+    // line width, so callers just pick one number per slot. `cornerRadius`
+    // selects the shape: a rounded square (compact leading slot, matching
+    // the app's normal icon shape) when non-nil, a circle (minimal slot)
+    // when nil — the ring reuses the exact same shape as the clip, so on
+    // `minimal`, where the system additionally forces its own circular
+    // mask on whatever this returns, the ring already coincides with that
+    // mask instead of a corner badge that would fall outside it and get
+    // clipped away.
     private func brandedIcon(size: CGFloat, cornerRadius: CGFloat?, isResting: Bool) -> some View {
         let icon = Image("LiveActivityIcon")
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
+        let ringWidth = size * 0.14
 
         return Group {
             if let cornerRadius {
-                icon.clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                icon.clipShape(shape).overlay {
+                    if isResting {
+                        shape.strokeBorder(Color.orange, lineWidth: ringWidth)
+                    }
+                }
             } else {
-                icon.clipShape(Circle())
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if isResting {
-                Image(systemName: "timer")
-                    .font(.system(size: size * 0.4, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(size * 0.08)
-                    .background(Circle().fill(.orange))
+                icon.clipShape(Circle()).overlay {
+                    if isResting {
+                        Circle().strokeBorder(Color.orange, lineWidth: ringWidth)
+                    }
+                }
             }
         }
     }
