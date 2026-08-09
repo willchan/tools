@@ -59,6 +59,10 @@ test.describe('Completed Day Buttons', () => {
   });
 
   test('multiple completed days are all marked', async ({ page }) => {
+    // Two completeAllSets() rounds; give this the same proportional headroom
+    // as the 4-round test below (15s default * 2 rounds), since under CI
+    // worker contention this timed out on iphone-webkit at the default.
+    test.setTimeout(30_000);
     // Complete Squat Day (day 0)
     await page.click('#start-workout-btn');
     await page.waitForSelector('.workout-screen');
@@ -79,6 +83,9 @@ test.describe('Completed Day Buttons', () => {
   });
 
   test('visual snapshot of home screen with completed days', async ({ page }) => {
+    // Same rationale as the test above: two completeAllSets() rounds need
+    // more than the 15s default under CI worker contention.
+    test.setTimeout(30_000);
     // Complete Squat Day (day 0)
     await page.click('#start-workout-btn');
     await page.waitForSelector('.workout-screen');
