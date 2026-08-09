@@ -269,7 +269,12 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       setEl.dataset.testid = `set-${idx}`;
       if (set.isBonus) setEl.dataset.bonus = 'true';
 
-      let repsDisplay = `${set.reps} reps`;
+      // A bonus set may owe fewer reps than a normal set of this exercise
+      // (e.g. only 3 more needed to close the deficit) — prescribe exactly
+      // that, not the full per-set count.
+      const effectiveReps = set.owedReps ?? set.reps;
+
+      let repsDisplay = `${effectiveReps} reps`;
       if (set.isAmrap) repsDisplay += '+';
       if (set.isBonus) repsDisplay += ' (bonus)';
 
@@ -302,7 +307,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
               ${plateDisplay}
             </div>
             <div class="set-actions">
-              <div class="reps-stepper" data-testid="edit-reps-stepper" data-max="${set.isAmrap ? 999 : set.reps}">
+              <div class="reps-stepper" data-testid="edit-reps-stepper" data-max="${set.isAmrap ? 999 : effectiveReps}">
                 <span class="stepper-label">Reps:</span>
                 <button class="stepper-btn" data-testid="edit-stepper-dec" aria-label="Fewer reps">−</button>
                 <span class="stepper-value" data-testid="edit-stepper-value">${completed.actualReps}</span>
@@ -356,10 +361,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
               ${deficitDisplay}
             </div>
             <div class="set-actions">
-              <div class="reps-stepper hidden" data-testid="reps-stepper" data-max="${set.reps}">
+              <div class="reps-stepper hidden" data-testid="reps-stepper" data-max="${effectiveReps}">
                 <span class="stepper-label">Reps:</span>
                 <button class="stepper-btn" data-testid="stepper-dec" aria-label="Fewer reps">−</button>
-                <span class="stepper-value" data-testid="stepper-value">${set.reps}</span>
+                <span class="stepper-value" data-testid="stepper-value">${effectiveReps}</span>
                 <button class="stepper-btn" data-testid="stepper-inc" aria-label="More reps">+</button>
               </div>
               <button class="btn btn-primary done-set-btn" data-testid="done-set-btn">Done</button>
@@ -533,7 +538,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         exerciseId: groupSet.exerciseId,
         tmPercentage: groupSet.tmPercentage,
         tmLiftId: groupSet.tmLiftId,
-        reps: decision.prescribedReps,
+        // `reps` stays at the group's normal per-set value (not the owed
+        // amount) so this bonus set still resolves to the same volume
+        // group — getVolumeGroupKey folds `reps` into the group identity.
+        reps: groupSet.reps,
+        owedReps: decision.prescribedReps,
         isAmrap: false,
         isBonus: true,
       });
@@ -543,17 +552,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   async function markSetDone() {
     const set = workoutSets[currentSetIndex];
     const weight = getSetWeight(set, tmMap);
+    // A bonus set may be prescribed fewer reps than a normal set (see
+    // reconcileVolumeGroup) — that's what "done, unedited" and the missed-
+    // reps comparison should measure against, not the full per-set count.
+    const effectiveReps = set.owedReps ?? set.reps;
 
-    let actualReps = set.reps;
+    let actualReps = effectiveReps;
     const stepperValue = setsContainer.querySelector('[data-testid="stepper-value"]') as HTMLElement | null;
     if (stepperValue) {
       actualReps = parseInt(stepperValue.textContent || '', 10);
-      if (isNaN(actualReps)) actualReps = set.reps;
+      if (isNaN(actualReps)) actualReps = effectiveReps;
     }
 
     completedSets.push({
       exerciseId: set.exerciseId,
-      prescribedReps: set.reps,
+      prescribedReps: effectiveReps,
       actualReps,
       weight,
       isAmrap: set.isAmrap,
