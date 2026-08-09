@@ -169,18 +169,10 @@ test.describe('Foreground rest-timer notification & sound', () => {
     await context.grantPermissions(['notifications']);
 
     await page.addInitScript(() => {
-      // context.grantPermissions() backs the permission store the browser
-      // consults for a *new* Notification.requestPermission() call, but
-      // doesn't reliably flip the already-read-only `Notification.permission`
-      // getter in every Chromium build this suite runs against. Stub it
-      // directly so this test exercises fireTimerNotification()'s actual
-      // `Notification.permission !== 'granted'` branch deterministically,
-      // the same way the app would behave once a real user has granted it.
-      Object.defineProperty(Notification, 'permission', {
-        value: 'granted',
-        configurable: true,
-      });
-
+      // Set up the message spy first, unconditionally — everything below
+      // this line must run even if the Notification stubbing that follows
+      // doesn't apply, or waitForFunction below sees __swMessages as
+      // undefined instead of an (empty-then-growing) array.
       (window as unknown as { __swMessages: Array<{ type: string }> }).__swMessages = [];
       const origDescriptor = Object.getOwnPropertyDescriptor(ServiceWorker.prototype, 'postMessage');
       const origPostMessage = origDescriptor?.value;
@@ -190,6 +182,23 @@ test.describe('Foreground rest-timer notification & sound', () => {
         );
         if (origPostMessage) origPostMessage.call(this, msg);
       };
+
+      // context.grantPermissions() backs the permission store the browser
+      // consults for a *new* Notification.requestPermission() call, but
+      // doesn't reliably flip the already-read-only `Notification.permission`
+      // getter in every browser engine this suite runs against. Stub it
+      // directly so this test exercises fireTimerNotification()'s actual
+      // `Notification.permission !== 'granted'` branch deterministically,
+      // the same way the app would behave once a real user has granted it.
+      // Guarded: WebKit's headless test config doesn't expose a global
+      // `Notification` at all, so referencing it unguarded would throw here
+      // and abort the rest of this script — including the spy above.
+      if (typeof Notification !== 'undefined') {
+        Object.defineProperty(Notification, 'permission', {
+          value: 'granted',
+          configurable: true,
+        });
+      }
     });
 
     await page.goto('/');
@@ -197,6 +206,15 @@ test.describe('Foreground rest-timer notification & sound', () => {
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, {
       timeout: 5000,
     });
+
+    // fireTimerNotification() gates its whole SW-notification branch on
+    // `'Notification' in window` — some WebKit test builds expose no global
+    // Notification constructor at all, so there's nothing for the stub above
+    // to grant and TIMER_DONE is never requested from the page in that
+    // environment (same as the app's own real behavior there). Skip rather
+    // than assert a false failure when that's the case.
+    const hasNotificationApi = await page.evaluate(() => 'Notification' in window);
+    test.skip(!hasNotificationApi, 'No Notification API in this browser engine/build');
 
     await page.evaluate(async () => {
       const { putSettings, getSettings } = await import('/src/db/database.ts');
