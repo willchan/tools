@@ -394,7 +394,7 @@ jobs:
     # runtime can include non-notched models like iPhone SE), so this job
     # boots an explicitly pinned notched/Dynamic-Island model instead.
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: workout-tracker
@@ -453,6 +453,24 @@ jobs:
       - name: Sync Capacitor iOS project
         run: npx cap sync ios
 
+      - name: Xcode version
+        id: xcode
+        run: echo "version=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      # Same rationale as simulator-build's DerivedData cache: the build
+      # compiles seven SPM packages from source, which dominates wall time.
+      # A distinct path/key (rather than sharing simulator-build's) because
+      # a `-scheme AppUITests` test run and a `-scheme App` build produce
+      # different derived data layouts, and the two jobs run on separate
+      # runners in parallel so a shared key would just race, not share.
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: workout-tracker/ios/App/build-uitest
+          key: ios-deriveddata-uitest-${{ steps.xcode.outputs.version }}-${{ hashFiles('workout-tracker/bun.lock', 'workout-tracker/ios/App/CapApp-SPM/Package.swift', 'workout-tracker/ios/App/App.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ios-deriveddata-uitest-${{ steps.xcode.outputs.version }}-
+
       - name: Wait for the Simulator to finish booting
         run: xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
 
@@ -463,4 +481,5 @@ jobs:
             -scheme AppUITests \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -skipPackagePluginValidation \
+            -derivedDataPath build-uitest \
             CODE_SIGNING_ALLOWED=NO

@@ -17,7 +17,6 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
-		A9BFF7DB5A80C2347E20D3B8 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7C5DCC6D1D2CF25C2ECC24DC /* Foundation.framework */; };
 		E58C7DCD9E64C39900D08461 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE30FC08F99698CD199BA141 /* MainViewController.swift */; };
 		F83305DF30284AC800893A0B /* AppLogic in Frameworks */ = {isa = PBXBuildFile; productRef = F83305DE30284AC800893A0B /* AppLogic */; };
 		F8B7DD9130259BA200410C14 /* timer-done.wav in Resources */ = {isa = PBXBuildFile; fileRef = F8B7DD9030259BA100410C14 /* timer-done.wav */; };
@@ -67,7 +66,6 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
-		7C5DCC6D1D2CF25C2ECC24DC /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A443404BA27C03A3D8538D0F /* AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -109,7 +107,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A9BFF7DB5A80C2347E20D3B8 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -183,20 +180,11 @@
 			path = AppUITests;
 			sourceTree = "<group>";
 		};
-		F3B38D8460C8F421D38A4D95 /* iOS */ = {
-			isa = PBXGroup;
-			children = (
-				7C5DCC6D1D2CF25C2ECC24DC /* Foundation.framework */,
-			);
-			name = iOS;
-			sourceTree = "<group>";
-		};
 		F8B7DD9730259C8300410C14 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				F8B7DD9830259C8300410C14 /* WidgetKit.framework */,
 				F8B7DD9A30259C8400410C14 /* SwiftUI.framework */,
-				F3B38D8460C8F421D38A4D95 /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -279,13 +267,13 @@
 						LastSwiftMigration = 1100;
 						ProvisioningStyle = Automatic;
 					};
-					F8B7DD9530259C8300410C14 = {
-						CreatedOnToolsVersion = 26.5;
-					};
 					A4D464AF9DD835F6C009455D = {
 						CreatedOnToolsVersion = 16.2;
 						ProvisioningStyle = Automatic;
 						TestTargetID = 504EC3031FED79650016851F;
+					};
+					F8B7DD9530259C8300410C14 = {
+						CreatedOnToolsVersion = 26.5;
 					};
 				};
 			};

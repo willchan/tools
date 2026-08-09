@@ -61,12 +61,27 @@ final class SafeAreaUITests: XCTestCase {
         let homeNavButton = app.buttons["Home"]
         XCTAssertTrue(homeNavButton.waitForExistence(timeout: 30))
 
+        // A button's own frame always sits inside its window's frame — that
+        // alone would be true whether or not .bottom-nav claims any bottom
+        // inset at all, so it can't tell a working safe-area reservation
+        // apart from a missing one. What can: the *gap* between the nav
+        // button's bottom edge and the window's true bottom edge. .bottom-nav
+        // pins to the real viewport bottom (position: fixed; bottom: 0) and
+        // pads itself by env(safe-area-inset-bottom), so a nav button sits
+        // above that padding — on every notched/Dynamic-Island Simulator
+        // (this suite only runs pinned to one, see ios.yml) the real home
+        // indicator inset is at least ~20pt. If that padding were ever
+        // dropped, the button would sit flush against the window's bottom
+        // edge and this gap would collapse to ~0.
         let navBottom = homeNavButton.frame.maxY
-        let windowSafeAreaBottom = app.windows.firstMatch.frame.maxY
-        XCTAssertLessThanOrEqual(
-            navBottom,
-            windowSafeAreaBottom,
-            "bottom nav button extends past the window's frame"
+        let windowBottom = app.windows.firstMatch.frame.maxY
+        let gap = windowBottom - navBottom
+        let minimumGap: CGFloat = 15
+        XCTAssertGreaterThanOrEqual(
+            gap,
+            minimumGap,
+            "bottom nav sits only \(gap)pt above the window's bottom edge — "
+                + ".bottom-nav must claim env(safe-area-inset-bottom)"
         )
     }
 }
