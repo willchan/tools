@@ -82,6 +82,15 @@ body {
   align-items: center;
   gap: 12px;
   padding: 16px;
+  /*
+   * #app now renders edge-to-edge (height: 100dvh under viewport-fit=cover
+   * in the native shell), so the header — the flex item that sits at the
+   * very top — must claim the top safe area itself or its content renders
+   * under the notch/Dynamic Island. This also shrinks the flex-grow'd
+   * *-screen below it by the same amount, which is what was showing up as
+   * extra blank space above the bottom nav.
+   */
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
@@ -334,6 +343,9 @@ body {
   background: var(--color-accent);
   color: #fff;
   padding: 20px 16px;
+  /* Same edge-to-edge/notch concern as .app-header: this overlay pins to
+     the true viewport top and covers the header while active. */
+  padding-top: calc(20px + env(safe-area-inset-top, 0px));
   display: flex;
   align-items: center;
   gap: 12px;

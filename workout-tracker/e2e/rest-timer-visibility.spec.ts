@@ -25,6 +25,27 @@ test.describe('Rest Timer Visibility', () => {
     expect(timerBox!.y).toBeLessThanOrEqual(10); // At or near top of viewport
   });
 
+  test('rest timer reserves the top safe area so its content clears the notch/Dynamic Island', async ({ page, browserName }) => {
+    // Same concern as .app-header (see home.spec.ts): .rest-timer is a
+    // position: fixed overlay pinned to the true viewport top, covering
+    // the header while a set is resting. See that test for why this
+    // asserts getComputedStyle after a CDP safe-area-insets override
+    // rather than a static stylesheet-text check, and why webkit is
+    // skipped (CDP is Chromium-only; this file also runs on iphone-webkit).
+    test.skip(browserName === 'webkit', 'CDP safe-area-insets override is Chromium-only');
+
+    const session = await page.context().newCDPSession(page);
+    await session.send('Emulation.setSafeAreaInsetsOverride', {
+      insets: { top: 59, topMax: 59, bottom: 0, bottomMax: 0, left: 0, leftMax: 0, right: 0, rightMax: 0 },
+    });
+
+    await page.click('[data-testid="done-set-btn"]');
+    await expect(page.locator('#rest-timer')).toBeVisible();
+
+    const paddingTop = await page.locator('#rest-timer').evaluate((el) => getComputedStyle(el).paddingTop);
+    expect(paddingTop).toBe('79px'); // base 20px + the 59px mocked inset
+  });
+
   test('rest timer has a large, prominent countdown display', async ({ page }) => {
     await page.click('[data-testid="done-set-btn"]');
 
