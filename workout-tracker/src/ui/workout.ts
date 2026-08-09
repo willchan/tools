@@ -220,10 +220,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   `;
   container.appendChild(header);
 
-  const main = document.createElement('main');
-  main.className = 'workout-screen';
-
-  // Timer display
+  // Timer display — appended directly to #app (not the scrolling
+  // .workout-screen) so it stays a fixed-position sibling of the scroll
+  // container rather than a descendant of one. WebKit has historically
+  // compositor-pinned `position: fixed` descendants of a
+  // `-webkit-overflow-scrolling: touch` ancestor to that ancestor's own
+  // scroll layer instead of the true viewport, which would make the timer
+  // drift with the set list instead of staying put while resting.
   const timerEl = document.createElement('div');
   timerEl.className = 'rest-timer hidden';
   timerEl.id = 'rest-timer';
@@ -232,7 +235,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     <span class="timer-value" id="timer-value">0:00</span>
     <button id="skip-timer-btn" class="btn btn-small">Skip</button>
   `;
-  main.appendChild(timerEl);
+  container.appendChild(timerEl);
+
+  const main = document.createElement('main');
+  main.className = 'workout-screen';
 
   // Sets list
   const setsContainer = document.createElement('div');

@@ -61,6 +61,20 @@ test.describe('Home Screen', () => {
     await expect(page.locator('h1')).toHaveText('Settings');
   });
 
+  test('page has no vertical scroll overflow on load', async ({ page }) => {
+    // Regression test: the app shell used to size #app with min-height: 100dvh
+    // while html/body allowed native document scrolling, so on some viewports
+    // the document was a few px taller than the visual viewport — no visible
+    // scrollbar, but the page was vertically offset/scrollable by that slop.
+    await expect(page.locator('[data-testid="next-workout-card"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tm-grid"]')).toBeVisible();
+    const { scrollHeight, clientHeight } = await page.evaluate(() => ({
+      scrollHeight: document.documentElement.scrollHeight,
+      clientHeight: document.documentElement.clientHeight,
+    }));
+    expect(scrollHeight).toBeLessThanOrEqual(clientHeight);
+  });
+
   test('visual snapshot of home screen', async ({ page }) => {
     // Wait for data-driven content to render
     await expect(page.locator('[data-testid="next-workout-card"]')).toBeVisible();

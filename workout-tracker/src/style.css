@@ -27,24 +27,53 @@
 html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
   font-family: var(--font);
   background: var(--color-bg);
   color: var(--color-text);
-  min-height: 100dvh;
-  overflow-x: hidden;
+  height: 100dvh;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * #app is a fixed-height shell, not a scrolling document: the previous
+ * min-height: 100dvh (with the document itself left natively scrollable)
+ * let the page end up a few px taller than the visual viewport on some
+ * devices, which made the whole app silently swipe-scrollable/offset even
+ * though there was nothing extra to show. Individual `*-screen` sections
+ * own their own overflow-y instead, so only content that actually
+ * overflows scrolls, and the header/nav shell never moves.
+ */
 #app {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;
   max-width: 600px;
   margin: 0 auto;
   position: relative;
+  overflow: hidden;
+}
+
+/*
+ * Every full-page section scrolls internally rather than the document.
+ * min-height: 0 overrides the flex item default of min-height: auto,
+ * which would otherwise let these grow to fit their content and push
+ * past #app's fixed height instead of scrolling.
+ */
+.home-screen,
+.workout-screen,
+.templates-screen,
+.template-edit-screen,
+.history-screen,
+.settings-screen {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* === Header === */
