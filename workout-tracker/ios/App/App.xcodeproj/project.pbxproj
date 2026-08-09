@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1DD2FCE915CDB80AC6A48526 /* SafeAreaUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FE5BFA0839B67353D830EA /* SafeAreaUITests.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
@@ -16,6 +17,7 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		A9BFF7DB5A80C2347E20D3B8 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7C5DCC6D1D2CF25C2ECC24DC /* Foundation.framework */; };
 		E58C7DCD9E64C39900D08461 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE30FC08F99698CD199BA141 /* MainViewController.swift */; };
 		F83305DF30284AC800893A0B /* AppLogic in Frameworks */ = {isa = PBXBuildFile; productRef = F83305DE30284AC800893A0B /* AppLogic */; };
 		F8B7DD9130259BA200410C14 /* timer-done.wav in Resources */ = {isa = PBXBuildFile; fileRef = F8B7DD9030259BA100410C14 /* timer-done.wav */; };
@@ -25,6 +27,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		B71FCF3F353401465E7690C8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 504EC3031FED79650016851F;
+			remoteInfo = App;
+		};
 		F8B7DDA630259C8600410C14 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
@@ -58,8 +67,11 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		7C5DCC6D1D2CF25C2ECC24DC /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		A443404BA27C03A3D8538D0F /* AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A4FE5BFA0839B67353D830EA /* SafeAreaUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SafeAreaUITests.swift; sourceTree = "<group>"; };
 		EE30FC08F99698CD199BA141 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		F8B7DD9030259BA100410C14 /* timer-done.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "timer-done.wav"; sourceTree = "<group>"; };
 		F8B7DD9630259C8300410C14 /* LiveActivityWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiveActivityWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -68,7 +80,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		F8B7DDA930259C8600410C14 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		F8B7DDA930259C8600410C14 /* Exceptions for "LiveActivityWidget" folder in "LiveActivityWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -78,10 +90,29 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		F8B7DD9C30259C8400410C14 /* LiveActivityWidget */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (F8B7DDA930259C8600410C14 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = LiveActivityWidget; sourceTree = "<group>"; };
+		F8B7DD9C30259C8400410C14 /* LiveActivityWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F8B7DDA930259C8600410C14 /* Exceptions for "LiveActivityWidget" folder in "LiveActivityWidgetExtension" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = LiveActivityWidget;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		20F1700493D3B887C40E826F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A9BFF7DB5A80C2347E20D3B8 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -111,6 +142,8 @@
 				F8B7DD9C30259C8400410C14 /* LiveActivityWidget */,
 				F8B7DD9730259C8300410C14 /* Frameworks */,
 				504EC3051FED79650016851F /* Products */,
+				A443404BA27C03A3D8538D0F /* AppUITests.xctest */,
+				9F1B0FC5E17A27F5FC897418 /* AppUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -141,11 +174,29 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		9F1B0FC5E17A27F5FC897418 /* AppUITests */ = {
+			isa = PBXGroup;
+			children = (
+				A4FE5BFA0839B67353D830EA /* SafeAreaUITests.swift */,
+			);
+			name = AppUITests;
+			path = AppUITests;
+			sourceTree = "<group>";
+		};
+		F3B38D8460C8F421D38A4D95 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				7C5DCC6D1D2CF25C2ECC24DC /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
 		F8B7DD9730259C8300410C14 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				F8B7DD9830259C8300410C14 /* WidgetKit.framework */,
 				F8B7DD9A30259C8400410C14 /* SwiftUI.framework */,
+				F3B38D8460C8F421D38A4D95 /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -176,6 +227,24 @@
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A4D464AF9DD835F6C009455D /* AppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1A4C0428175F49AA41E8871 /* Build configuration list for PBXNativeTarget "AppUITests" */;
+			buildPhases = (
+				D50EA17DAF2F29E0B6E36A89 /* Sources */,
+				20F1700493D3B887C40E826F /* Frameworks */,
+				FA6569D88E62031A4943F24C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E8B787E601D72E477CA32699 /* PBXTargetDependency */,
+			);
+			name = AppUITests;
+			productName = AppUITests;
+			productReference = A443404BA27C03A3D8538D0F /* AppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		F8B7DD9530259C8300410C14 /* LiveActivityWidgetExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F8B7DDAA30259C8600410C14 /* Build configuration list for PBXNativeTarget "LiveActivityWidgetExtension" */;
@@ -192,8 +261,6 @@
 				F8B7DD9C30259C8400410C14 /* LiveActivityWidget */,
 			);
 			name = LiveActivityWidgetExtension;
-			packageProductDependencies = (
-			);
 			productName = LiveActivityWidgetExtension;
 			productReference = F8B7DD9630259C8300410C14 /* LiveActivityWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -214,6 +281,11 @@
 					};
 					F8B7DD9530259C8300410C14 = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					A4D464AF9DD835F6C009455D = {
+						CreatedOnToolsVersion = 16.2;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 504EC3031FED79650016851F;
 					};
 				};
 			};
@@ -236,6 +308,7 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				F8B7DD9530259C8300410C14 /* LiveActivityWidgetExtension */,
+				A4D464AF9DD835F6C009455D /* AppUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -262,6 +335,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FA6569D88E62031A4943F24C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -275,6 +355,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D50EA17DAF2F29E0B6E36A89 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1DD2FCE915CDB80AC6A48526 /* SafeAreaUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F8B7DD9230259C8300410C14 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -285,6 +373,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		E8B787E601D72E477CA32699 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = App;
+			target = 504EC3031FED79650016851F /* App */;
+			targetProxy = B71FCF3F353401465E7690C8 /* PBXContainerItemProxy */;
+		};
 		F8B7DDA730259C8600410C14 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = F8B7DD9530259C8300410C14 /* LiveActivityWidgetExtension */;
@@ -312,6 +406,41 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		0CD9668D1FCC7284F824AFE9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 36H4G6J7XF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.willchan.workouttracker.AppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = App;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		3D8B4077580D848EE6F2199D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 36H4G6J7XF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.willchan.workouttracker.AppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = App;
+			};
+			name = Debug;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -567,6 +696,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F1A4C0428175F49AA41E8871 /* Build configuration list for PBXNativeTarget "AppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0CD9668D1FCC7284F824AFE9 /* Release */,
+				3D8B4077580D848EE6F2199D /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

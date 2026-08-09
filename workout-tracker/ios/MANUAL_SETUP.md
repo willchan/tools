@@ -43,15 +43,13 @@ TESTFLIGHT_SETUP.md's signing setup is already complete for this repo.
 
 The only hard limit: ActivityKit Live Activities don't render in the iOS
 Simulator at all, so actually *seeing* a change to the widget still needs
-a real device — `ios.yml`'s Simulator smoke test only proves the native
-shell boots and the web bundle runs, not that the widget looks right.
-There's also no XCUITest target driving on-device UI interaction, so a
-Live Activity's actual rendering is verified by eye, on a device, via
-TestFlight.
+a real device — neither `ios.yml`'s Simulator smoke test nor the
+`AppUITests` XCUITest target below can render one, so a Live Activity's
+actual rendering is verified by eye, on a device, via TestFlight.
 
 ## Test coverage layers
 
-Four layers exist, each covering something the others can't:
+Five layers exist, each covering something the others can't:
 
 1. **`e2e/native-platform.spec.ts` (Playwright, runs everywhere, no Mac needed).**
    Forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform`
@@ -81,7 +79,22 @@ Four layers exist, each covering something the others can't:
    (crash on launch, blank WebView, bad bundle) that a browser-only test
    can't see. It doesn't drive the UI, so it can't verify that tapping a
    button actually schedules a notification or starts a Live Activity.
-4. **Manual verification on a real device, via TestFlight.** The only way
+4. **`AppUITests` XCUITest target (CI only, no Mac needed).** Drives the
+   *compiled app* in a real WKWebView on a pinned notched/Dynamic-Island
+   Simulator (`ios.yml`'s `ui-test-safe-area` job) — the ground-truth
+   backstop for `e2e/safe-area.spec.ts`'s CSS-level coverage. Playwright can
+   only prove the app's CSS *responds correctly* to a mocked
+   `env(safe-area-inset-*)` value, because Chromium/WebKit never resolve
+   that to anything but 0 outside a real WKWebView; `AppUITests` proves the
+   real device actually *reports* a non-zero inset and the header clears it
+   (`SafeAreaUITests.testHeaderTitleClearsTheTopSafeArea`). Kept
+   intentionally minimal — one or two geometry assertions per screen, not a
+   parallel visual regression suite; that thoroughness lives in Playwright.
+   `App` had no XCUITest target of its own for the same reason `AppLogic`
+   exists (no Apple-provided CLI to mutate `App.xcodeproj`'s target graph)
+   — see "Add a UI test target" below for how this one was added without
+   Xcode, using the third-party `xcodeproj` gem instead of the GUI.
+5. **Manual verification on a real device, via TestFlight.** The only way
    to confirm actual Live Activity rendering and notification delivery,
    for the reasons above.
 
@@ -147,3 +160,55 @@ for reference if the link ever needs to be redone (e.g. after a
    `LiveActivityWidget` too, if the widget needs it).
 4. Build once (⌘B) to confirm it resolves, then commit the resulting
    `project.pbxproj`/`Package.resolved` changes.
+
+### Add a UI test target
+
+`AppUITests` (see "Test coverage layers" above) already exists and is
+committed — this is reference for if it ever needs to be recreated (e.g.
+after a `project.pbxproj` regeneration). Unlike the other one-time steps
+above, this one does *not* need Xcode's GUI: Apple's own CLI can't mutate
+an `.xcodeproj`'s target graph, but the third-party
+[`xcodeproj`](https://github.com/CocoaPods/Xcodeproj) Ruby gem (from the
+CocoaPods project, `gem install xcodeproj`) edits `project.pbxproj`
+directly and can add a target the same way Xcode's GUI would:
+
+```ruby
+require 'xcodeproj'
+
+project = Xcodeproj::Project.open('App.xcodeproj')
+app_target = project.targets.find { |t| t.name == 'App' }
+app_settings = app_target.build_configurations.find { |c| c.name == 'Debug' }.build_settings
+
+ui_test_target = project.new_target(
+  :ui_test_bundle, 'AppUITests', :ios,
+  app_settings['IPHONEOS_DEPLOYMENT_TARGET'], project.main_group, :swift
+)
+ui_test_target.add_dependency(app_target)
+ui_test_target.build_configurations.each do |config|
+  config.build_settings.merge!(
+    'CODE_SIGN_STYLE' => 'Automatic',
+    'DEVELOPMENT_TEAM' => app_settings['DEVELOPMENT_TEAM'],
+    'GENERATE_INFOPLIST_FILE' => 'YES',
+    'IPHONEOS_DEPLOYMENT_TARGET' => app_settings['IPHONEOS_DEPLOYMENT_TARGET'],
+    'PRODUCT_BUNDLE_IDENTIFIER' => "#{app_settings['PRODUCT_BUNDLE_IDENTIFIER']}.AppUITests",
+    'SWIFT_VERSION' => app_settings['SWIFT_VERSION'],
+    'TARGETED_DEVICE_FAMILY' => app_settings['TARGETED_DEVICE_FAMILY'],
+    'TEST_TARGET_NAME' => 'App' # the "Target to be Tested" relationship
+  )
+end
+project.save
+```
+
+`TEST_TARGET_NAME` plus the target dependency is what makes `xcodebuild
+test -scheme AppUITests` build and install `App`, then run the UI test
+bundle against it. A shared scheme
+(`App.xcodeproj/xcshareddata/xcschemes/AppUITests.xcscheme`) is committed
+alongside the target — without it, `xcodebuild -scheme AppUITests` has
+nothing to resolve the name to (the project has no other shared schemes;
+`App`'s own builds work without one because `xcodebuild` synthesizes an
+implicit single-target scheme on the fly when `-scheme` matches a target
+name exactly, but that implicit scheme has no Test action wired up, so a
+new test target still needs an explicit scheme). Regenerating the scheme
+by hand means copying `App`'s `BlueprintIdentifier`/`BuildableName` and the
+new target's into the `<BuildableReference>` elements — see the committed
+file for the exact shape Xcode expects.

@@ -22,6 +22,16 @@
   --radius: 12px;
   --radius-sm: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /*
+   * Indirected through custom properties (rather than referencing env()
+   * directly at each use site) so tests can override the resolved inset
+   * value — env() itself can't be mocked from Playwright, but a CSS custom
+   * property can be forced with an injected !important rule. Real devices
+   * still get the real env() value here; this is a no-op passthrough
+   * outside of tests.
+   */
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 html {
@@ -90,7 +100,7 @@ body {
    * *-screen below it by the same amount, which is what was showing up as
    * extra blank space above the bottom nav.
    */
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  padding-top: calc(16px + var(--safe-area-inset-top));
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
@@ -275,7 +285,7 @@ body {
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
   z-index: 20;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-area-inset-bottom);
 }
 
 .nav-btn {
@@ -345,7 +355,7 @@ body {
   padding: 20px 16px;
   /* Same edge-to-edge/notch concern as .app-header: this overlay pins to
      the true viewport top and covers the header while active. */
-  padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  padding-top: calc(20px + var(--safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: 12px;
@@ -541,7 +551,7 @@ body {
   background: var(--color-surface);
   border-radius: var(--radius) var(--radius) 0 0;
   padding: 24px 20px;
-  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(24px + var(--safe-area-inset-bottom));
   width: 100%;
   max-width: 600px;
   display: flex;

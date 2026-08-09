@@ -61,37 +61,18 @@ test.describe('Home Screen', () => {
     await expect(page.locator('h1')).toHaveText('Settings');
   });
 
-  test('header reserves the top safe area so content clears the notch/Dynamic Island', async ({ page, browserName }) => {
-    // Regression test: #app renders edge-to-edge in the native shell
-    // (viewport-fit=cover), so .app-header — the flex item pinned at the
-    // top — must claim env(safe-area-inset-top) itself or its content
-    // (title, back/abandon buttons) renders under the notch.
-    //
-    // Real safe-area-inset values are only non-zero on an actual notched
-    // device, so we use the CDP Emulation.setSafeAreaInsetsOverride API
-    // (added to Chromium for exactly this kind of PWA testing) to make
-    // env(safe-area-inset-top) resolve to a real, non-zero value here, then
-    // assert on the *computed* (cascade-resolved) style. Asserting on
-    // getComputedStyle rather than walking document.styleSheets for a
-    // matching selector matters: the latter can find and return an
-    // earlier/unrelated rule that isn't the one actually winning the
-    // cascade, silently passing even if a later override broke the fix.
-    //
-    // CDP is Chromium-only — this file also runs on iphone-webkit (see
-    // playwright.config.ts's crossProjectSpecs), where newCDPSession isn't
-    // available, so skip there. chromium and mobile-chrome (which is
-    // Chromium under a Pixel 5 UA/viewport, not a different engine) both
-    // cover this.
-    test.skip(browserName === 'webkit', 'CDP safe-area-insets override is Chromium-only');
-
-    const session = await page.context().newCDPSession(page);
-    await session.send('Emulation.setSafeAreaInsetsOverride', {
-      insets: { top: 59, topMax: 59, bottom: 0, bottomMax: 0, left: 0, leftMax: 0, right: 0, rightMax: 0 },
-    });
-
-    const paddingTop = await page.locator('.app-header').evaluate((el) => getComputedStyle(el).paddingTop);
-    expect(paddingTop).toBe('75px'); // base 16px + the 59px mocked inset
-  });
+  // Geometric coverage for the header/rest-timer/bottom-nav safe-area
+  // handling (header title clears a mocked notch inset, no unexplained gap
+  // appears above the bottom nav, visual snapshot with a mocked inset,
+  // etc.) lives in safe-area.spec.ts — see withSafeArea in
+  // e2e/helpers/safe-area.ts for why layout tests mock the CSS custom
+  // property rather than relying on env(), which Playwright's
+  // Chromium/WebKit builds never resolve to a non-zero value. It
+  // supersedes an earlier version of this test that used Chromium's CDP
+  // Emulation.setSafeAreaInsetsOverride to check computed style: the
+  // withSafeArea approach covers the same ground plus rest-timer/bottom-nav/
+  // layout-invariant/visual-snapshot coverage, and runs on all 3 Playwright
+  // projects rather than being skipped on webkit.
 
   test('page has no vertical scroll overflow on load', async ({ page }) => {
     // Regression test: the app shell used to size #app with min-height: 100dvh
