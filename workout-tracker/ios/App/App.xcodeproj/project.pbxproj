@@ -17,6 +17,7 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		E58C7DCD9E64C39900D08461 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE30FC08F99698CD199BA141 /* MainViewController.swift */; };
+		F83305DF30284AC800893A0B /* AppLogic in Frameworks */ = {isa = PBXBuildFile; productRef = F83305DE30284AC800893A0B /* AppLogic */; };
 		F8B7DD9130259BA200410C14 /* timer-done.wav in Resources */ = {isa = PBXBuildFile; fileRef = F8B7DD9030259BA100410C14 /* timer-done.wav */; };
 		F8B7DD9930259C8400410C14 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F8B7DD9830259C8300410C14 /* WidgetKit.framework */; };
 		F8B7DD9B30259C8400410C14 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F8B7DD9A30259C8400410C14 /* SwiftUI.framework */; };
@@ -58,8 +59,8 @@
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
-		EE30FC08F99698CD199BA141 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		EE30FC08F99698CD199BA141 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		F8B7DD9030259BA100410C14 /* timer-done.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "timer-done.wav"; sourceTree = "<group>"; };
 		F8B7DD9630259C8300410C14 /* LiveActivityWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiveActivityWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8B7DD9830259C8300410C14 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -86,6 +87,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				F83305DF30284AC800893A0B /* AppLogic in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -168,6 +170,7 @@
 			name = App;
 			packageProductDependencies = (
 				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
+				F83305DE30284AC800893A0B /* AppLogic */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -225,6 +228,7 @@
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
 				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
+				F83305DD30284AC800893A0B /* XCLocalSwiftPackageReference "AppLogic" */,
 			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
@@ -583,6 +587,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "CapApp-SPM";
 		};
+		F83305DD30284AC800893A0B /* XCLocalSwiftPackageReference "AppLogic" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = AppLogic;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -590,6 +598,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
+		};
+		F83305DE30284AC800893A0B /* AppLogic */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppLogic;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
