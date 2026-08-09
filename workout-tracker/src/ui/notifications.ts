@@ -178,11 +178,22 @@ export function fireTimerNotification(): void {
 
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-  // The SW's TIMER_START already scheduled a system notification, so we do
-  // NOT post TIMER_DONE here — that would cause a duplicate notification on
-  // platforms (notably Android) where same-tag notifications still surface
-  // twice when shown back-to-back.
-  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) return;
+  // Route through the SW rather than assuming its TIMER_START setTimeout
+  // already fired. That's a race, not a guarantee: the page's own expiry
+  // detection (a 250ms poll, or the visibilitychange/reload reconcilers)
+  // can notice expiry before the SW's setTimeout does, especially under
+  // CPU contention (e.g. parallel CI workers) that delays one clock or the
+  // other unpredictably. If we skipped this call on the assumption the SW
+  // already notified, and it hadn't, no notification would ever fire.
+  // TIMER_DONE is always safe to send — the SW's firedForEndTime dedupe
+  // (see sw.js) collapses this with an already-fired (or still-pending)
+  // setTimeout into a single notification either way, which is exactly
+  // what "SW dedupes when both setTimeout and TIMER_DONE arrive for the
+  // same timer" in e2e/timer-foreground-fix.spec.ts asserts.
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    postToSW({ type: 'TIMER_DONE' });
+    return;
+  }
 
   // Fallback for the rare case where no service worker is controlling the
   // page (e.g. very first load before activation).
