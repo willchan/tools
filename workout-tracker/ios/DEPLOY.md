@@ -150,5 +150,5 @@ If it fails, check the logs for:
 
 - **Workflow file:** `.github/workflows/ios-testflight.yml`
 - **Setup docs:** [`TESTFLIGHT_SETUP.md`](TESTFLIGHT_SETUP.md) (one-time setup, already complete)
-- **Manual Xcode setup:** [`MANUAL_SETUP.md`](MANUAL_SETUP.md) (for Live Activity widget, if adding it)
+- **iOS native setup:** [`MANUAL_SETUP.md`](MANUAL_SETUP.md) (Live Activity widget — already set up; editing it needs no Xcode, see that doc)
 - **GitHub Actions logs:** https://github.com/willchan/tools/actions
