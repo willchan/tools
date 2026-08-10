@@ -167,6 +167,58 @@ test.describe('Back Button Timer Cleanup', () => {
     // No "Time's Up!" UI should have appeared
     await expect(page.locator('[data-testid="timer-expired"]')).not.toBeAttached();
   });
+
+  /**
+   * Regression: the expiry-detection guard shared between the 250ms poll,
+   * the resumed-timer recovery interval, and the visibilitychange
+   * reconciler was briefly made module-level (persisting across
+   * renderWorkout() calls) instead of scoped to a single render. Since a
+   * render left running by bypassing #back-btn's cleanup (as above) keeps
+   * its own detector alive against now-detached DOM, a module-level guard
+   * let that *stale* render's detector win the race, permanently blocking
+   * the *live* render's own detector from ever updating the visible page —
+   * the done button stayed disabled forever with no way to proceed short of
+   * a reload, even though the underlying timer state had correctly cleared.
+   */
+  test('a stale detector left running by a previous render does not block the live render from updating on expiry', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    // Complete a set to start a real rest timer — this render's updateTimer
+    // poll and visibilitychange listener start running.
+    await page.click('[data-testid="done-set-btn"]');
+    await expect(page.locator('#rest-timer')).toBeVisible();
+
+    // Leave via a raw route change, bypassing #back-btn's cleanup (which
+    // would clearInterval + putTimerState(null)) — the stale render's poll
+    // and visibilitychange listener keep running against now-detached DOM.
+    await page.evaluate(() => {
+      window.location.hash = 'home';
+    });
+    await page.waitForSelector('#start-workout-btn');
+
+    // Re-enter the same in-progress workout — a fresh render finds the
+    // still-running timer and sets up its own recovery-interval detector,
+    // racing the stale render's original poll for the same expiry.
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await expect(page.locator('#rest-timer')).toBeVisible();
+
+    // Force the shared timer to expire immediately.
+    await page.evaluate(async () => {
+      const { putTimerState } = await import('/src/db/database.ts');
+      await putTimerState({ expectedEndTime: Date.now() - 1000, durationMs: 90000 });
+    });
+
+    // The LIVE render's done button must re-enable once its own detector —
+    // not just the stale render's, against detached DOM — processes the
+    // expiry.
+    await expect(page.locator('[data-testid="done-set-btn"]')).toBeEnabled({ timeout: 3000 });
+  });
 });
 
 test.describe('Cancel/Abandon Workout', () => {

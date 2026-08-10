@@ -15,10 +15,39 @@ export function scheduleBackgroundTimerNotification(expectedEndTime: number): vo
   if (isNativePlatform()) {
     // Native local notifications are scheduled with an absolute fire time —
     // the OS wakes the app for this, unlike the SW setTimeout path below,
-    // which iOS can suspend before it elapses.
+    // which iOS can suspend before it elapses. Once scheduled, this lives in
+    // the OS's own notification center, independent of this JS module — it
+    // survives a page reload or the app being backgrounded/evicted, which is
+    // exactly why fireTimerNotification() below queries the OS directly
+    // (getPending/getDeliveredNotifications) rather than trusting an
+    // in-memory "did schedule() succeed" flag that a reload would reset.
     void import('@capacitor/local-notifications')
-      .then(({ LocalNotifications }) =>
-        LocalNotifications.schedule({
+      .then(async ({ LocalNotifications }) => {
+        // The fixed id means a *delivered* entry from the previous rest
+        // timer is still sitting in getDeliveredNotifications() — the OS
+        // doesn't clear it just because a new one is scheduled, and nothing
+        // else in this codebase ever calls
+        // remove(All)DeliveredNotifications(). Left alone, that stale entry
+        // would permanently satisfy fireTimerNotification()'s "did the OS
+        // already alert" check for every timer after the first one that
+        // ever actually delivered — including ones whose schedule() below
+        // fails, silencing the fallback cue that failure case exists to
+        // trigger. Clear it before scheduling the new one so a later
+        // delivered-notification match can only mean *this* timer fired.
+        // This app only ever has this one kind of notification, so clearing
+        // all delivered ones (rather than filtering by id, which the
+        // plugin's types awkwardly require a title/body for) is equivalent
+        // and simpler. Best-effort: if this rejects, scheduling below still
+        // proceeds — but log it, since a silently-swallowed failure here is
+        // exactly what would leave the stale-entry problem this exists to
+        // prevent.
+        await LocalNotifications.removeAllDeliveredNotifications().catch((err: unknown) => {
+          void log(
+            'warn',
+            `clearing stale delivered timer notification failed: ${errString(err)}`,
+          );
+        });
+        return LocalNotifications.schedule({
           notifications: [
             {
               id: NATIVE_TIMER_NOTIFICATION_ID,
@@ -28,12 +57,12 @@ export function scheduleBackgroundTimerNotification(expectedEndTime: number): vo
               sound: 'timer-done.wav',
             },
           ],
-        }),
-      )
+        });
+      })
       .catch((err: unknown) => {
         void log(
           'warn',
-          `native timer notification schedule failed: ${err instanceof Error ? err.message : String(err)}`,
+          `native timer notification schedule failed: ${errString(err)}`,
         );
       });
   } else {
@@ -47,18 +76,17 @@ export function scheduleBackgroundTimerNotification(expectedEndTime: number): vo
   );
 }
 
-export function cancelBackgroundTimerNotification(): void {
+export async function cancelBackgroundTimerNotification(): Promise<void> {
   if (isNativePlatform()) {
-    void import('@capacitor/local-notifications')
-      .then(({ LocalNotifications }) =>
-        LocalNotifications.cancel({ notifications: [{ id: NATIVE_TIMER_NOTIFICATION_ID }] }),
-      )
-      .catch((err: unknown) => {
-        void log(
-          'warn',
-          `native timer notification cancel failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      await LocalNotifications.cancel({ notifications: [{ id: NATIVE_TIMER_NOTIFICATION_ID }] });
+    } catch (err) {
+      void log(
+        'warn',
+        `native timer notification cancel failed: ${errString(err)}`,
+      );
+    }
   } else {
     postToSW({ type: 'TIMER_CANCEL' });
   }
@@ -115,7 +143,7 @@ export function primeAudioContext(): void {
   } catch (err) {
     void log(
       'warn',
-      `audio context unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      `audio context unavailable: ${errString(err)}`,
     );
   }
 }
@@ -130,7 +158,7 @@ function resumeAudioContext(ctx: AudioContext): void {
   void ctx.resume().catch((err: unknown) => {
     void log(
       'warn',
-      `audio resume failed: ${err instanceof Error ? err.message : String(err)}`,
+      `audio resume failed: ${errString(err)}`,
     );
   });
 }
@@ -160,44 +188,89 @@ function playBeepPattern(): void {
   }
 }
 
-export async function fireTimerNotification(): Promise<void> {
+/**
+ * Fires the client-side rest-timer alert (haptic + beep, and/or a browser
+ * Notification), skipping it where an OS/SW notification already covers the
+ * same expiry. Returns whether the caller should still call
+ * cancelBackgroundTimerNotification() afterward — see the native branch's
+ * comment for why that isn't simply "always".
+ */
+export async function fireTimerNotification(): Promise<boolean> {
   if (isNativePlatform()) {
     // The native branch scheduled a real OS local notification for this
     // exact expiry (see scheduleBackgroundTimerNotification) — it has its
     // own sound (timer-done.wav) and system-default alert vibration, and it
     // fires from the OS clock regardless of whether this JS is even running.
-    // notifyTimerExpired() only gets a chance to cancel it *after* detecting
-    // expiry here — i.e. at or after the same instant the OS notification is
-    // scheduled to fire — so that cancel essentially never wins the race.
     // Playing our own haptic + beep unconditionally on top of that produced
     // a guaranteed double alert on every timer completion. Check whether the
     // OS notification will actually alert the user first; only fall back to
-    // our own cue when it won't (permission not granted, so nothing else
-    // will sound).
+    // our own cue when it won't. This queries the OS's own notification
+    // center directly (getPending/getDeliveredNotifications) rather than an
+    // in-memory "did schedule() succeed" flag — a flag like that resets on
+    // every page reload, but the OS-scheduled notification itself survives
+    // one (it's owned by iOS, not this JS), so a flag would wrongly report
+    // "no OS alert coming" for a rest timer that outlives a reload and cause
+    // exactly the double-alert this fix exists to prevent. Checking permission
+    // alone isn't enough either — schedule() can still reject (transient
+    // bridge error), which permission being granted wouldn't catch.
     let osWillAlert = false;
     try {
       const { LocalNotifications } = await import('@capacitor/local-notifications');
       const status = await LocalNotifications.checkPermissions();
-      osWillAlert = status.display === 'granted';
+      if (status.display === 'granted') {
+        // allSettled, not all: a transient failure in *one* of these must
+        // not discard whatever the *other* one already proved. Promise.all
+        // would reject the whole pair on the first failure, falling back to
+        // osWillAlert=false (and firing our own cue) even when the
+        // surviving result alone was enough to show the OS will alert.
+        const [pendingResult, deliveredResult] = await Promise.allSettled([
+          LocalNotifications.getPending(),
+          LocalNotifications.getDeliveredNotifications(),
+        ]);
+        if (pendingResult.status === 'rejected') {
+          void log('warn', `native getPending failed: ${errString(pendingResult.reason)}`);
+        }
+        if (deliveredResult.status === 'rejected') {
+          void log('warn', `native getDeliveredNotifications failed: ${errString(deliveredResult.reason)}`);
+        }
+        const isOurs = (n: { id: number }) => n.id === NATIVE_TIMER_NOTIFICATION_ID;
+        osWillAlert =
+          (pendingResult.status === 'fulfilled' && pendingResult.value.notifications.some(isOurs)) ||
+          (deliveredResult.status === 'fulfilled' && deliveredResult.value.notifications.some(isOurs));
+      }
     } catch (err) {
-      void log(
-        'warn',
-        `native notification permission check failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // Covers checkPermissions() above — getPending()/getDeliveredNotifications()
+      // failures are handled per-call above via allSettled.
+      void log('warn', `native OS-alert-state check failed: ${errString(err)}`);
     }
 
-    if (!osWillAlert) {
-      // navigator.vibrate is unimplemented in WebKit, so the native app gets
-      // real Taptic Engine feedback here instead of the (silently no-op)
-      // call in the web branch below.
-      void import('@capacitor/haptics')
-        .then(({ Haptics, NotificationType }) => Haptics.notification({ type: NotificationType.Success }))
-        .catch((err: unknown) => {
-          void log('warn', `haptics failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      playBeepPattern();
+    if (osWillAlert) {
+      // Trusting the OS to alert — do NOT also cancel it below.
+      // "pending" means it hasn't fired yet but will imminently (its
+      // scheduled time has already passed); cancelling it now would
+      // silently prevent it from ever firing, leaving nothing to alert the
+      // user at all. "delivered" means it already fired; cancel() only
+      // affects pending requests anyway, so it'd be a no-op, but skipping
+      // it also skips an unnecessary native bridge round trip that would
+      // otherwise widen the window for the next rest timer's own schedule()
+      // call to race against it (see notifyTimerExpired's comment).
+      return false;
     }
-    return;
+
+    // navigator.vibrate is unimplemented in WebKit, so the native app gets
+    // real Taptic Engine feedback here instead of the (silently no-op)
+    // call in the web branch below.
+    void import('@capacitor/haptics')
+      .then(({ Haptics, NotificationType }) => Haptics.notification({ type: NotificationType.Success }))
+      .catch((err: unknown) => {
+        void log('warn', `haptics failed: ${errString(err)}`);
+      });
+    playBeepPattern();
+    // Nothing is confirmed pending/delivered for this timer (permission
+    // denied, the OS state check itself failed, or schedule() never
+    // actually landed) — cancel whatever might still be lingering so it
+    // can't surface a late, redundant alert on top of the cue just fired.
+    return true;
   }
 
   if ('vibrate' in navigator) {
@@ -206,30 +279,41 @@ export async function fireTimerNotification(): Promise<void> {
 
   playBeepPattern();
 
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-
-  // Route through the SW rather than assuming its TIMER_START setTimeout
-  // already fired. That's a race, not a guarantee: the page's own expiry
-  // detection (a 250ms poll, or the visibilitychange/reload reconcilers)
-  // can notice expiry before the SW's setTimeout does, especially under
-  // CPU contention (e.g. parallel CI workers) that delays one clock or the
-  // other unpredictably. If we skipped this call on the assumption the SW
-  // already notified, and it hadn't, no notification would ever fire.
-  // TIMER_DONE is always safe to send — the SW's firedForEndTime dedupe
-  // (see sw.js) collapses this with an already-fired (or still-pending)
-  // setTimeout into a single notification either way, which is exactly
-  // what "SW dedupes when both setTimeout and TIMER_DONE arrive for the
-  // same timer" in e2e/timer-foreground-fix.spec.ts asserts.
-  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-    postToSW({ type: 'TIMER_DONE' });
-    return;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    // Route through the SW rather than assuming its TIMER_START setTimeout
+    // already fired. That's a race, not a guarantee: the page's own expiry
+    // detection (a 250ms poll, or the visibilitychange/reload reconcilers)
+    // can notice expiry before the SW's setTimeout does, especially under
+    // CPU contention (e.g. parallel CI workers) that delays one clock or the
+    // other unpredictably. If we skipped this call on the assumption the SW
+    // already notified, and it hadn't, no notification would ever fire.
+    // TIMER_DONE is always safe to send — the SW's firedForEndTime dedupe
+    // (see sw.js) collapses this with an already-fired (or still-pending)
+    // setTimeout into a single notification either way, which is exactly
+    // what "SW dedupes when both setTimeout and TIMER_DONE arrive for the
+    // same timer" in e2e/timer-foreground-fix.spec.ts asserts.
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      postToSW({ type: 'TIMER_DONE' });
+    } else {
+      // Fallback for the rare case where no service worker is controlling
+      // the page (e.g. very first load before activation).
+      new Notification('Rest Timer Complete', {
+        body: 'Time for your next set!',
+        icon: './icons/icon-192.png',
+        tag: 'rest-timer',
+      });
+    }
   }
 
-  // Fallback for the rare case where no service worker is controlling the
-  // page (e.g. very first load before activation).
-  new Notification('Rest Timer Complete', {
-    body: 'Time for your next set!',
-    icon: './icons/icon-192.png',
-    tag: 'rest-timer',
-  });
+  // Web/PWA: the SW's own firedForEndTime dedupe (see sw.js) already
+  // collapses a redundant setTimeout-vs-TIMER_DONE firing for the *same*
+  // timer, so cancelling the SW's pending setTimeout here is just tidying
+  // up a call that's already safe either way — always do it, preserving the
+  // existing tested behavior (e2e/timer-visibility-reconcile.spec.ts's
+  // "stale SW-side background timer must be cancelled").
+  return true;
+}
+
+function errString(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
