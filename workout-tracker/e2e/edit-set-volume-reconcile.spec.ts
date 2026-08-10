@@ -104,4 +104,37 @@ test.describe('Editing a completed set reconciles volume/bonus sets', () => {
     await expect(current.locator('.set-exercise')).toContainText('squat');
     await expect(current.locator('.set-prescription')).toContainText('bonus');
   });
+
+  test('editing an earlier set while a bonus set is pending keeps the bonus reps in sync with the new deficit', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1-4 at full, BBB 5 short (6/10). Total = 46 < 50 → bonus set
+    // appended, prescribed the 4 reps still owed.
+    for (let i = 0; i < 4; i++) await completeSet(page);
+    await logSetWithReps(page, 6, 10);
+
+    const pendingBonus = page.locator('.set-item.current');
+    await expect(pendingBonus).toHaveAttribute('data-bonus', 'true');
+    await expect(pendingBonus.locator('.set-prescription')).toContainText('4 reps');
+
+    // Correct BBB 1 down from 10 to 5 — cumulative drops from 46 to 41, so
+    // 9 are now owed instead of 4. The still-pending bonus set should pick
+    // up the new deficit rather than staying stuck asking for the stale 4.
+    // (The 3 main 5/3/1 sets share the "squat" exerciseId too but aren't
+    // part of this volume group, so BBB 1 is the 4th completed squat item.)
+    const bbb1 = page.locator('.set-item.completed').filter({ hasText: 'squat' }).nth(3);
+    await bbb1.locator('[data-testid="edit-set-btn"]').click();
+    await bbb1.locator('[data-testid="edit-stepper-dec"]').click();
+    await bbb1.locator('[data-testid="edit-stepper-dec"]').click();
+    await bbb1.locator('[data-testid="edit-stepper-dec"]').click();
+    await bbb1.locator('[data-testid="edit-stepper-dec"]').click();
+    await bbb1.locator('[data-testid="edit-stepper-dec"]').click();
+    await bbb1.locator('[data-testid="save-edit-btn"]').click();
+
+    // Still one bonus set (not removed, not duplicated), now prescribed 9.
+    await expect(page.locator('.set-item')).toHaveCount(15);
+    const updatedBonus = page.locator('.set-item.current');
+    await expect(updatedBonus).toHaveAttribute('data-bonus', 'true');
+    await expect(updatedBonus.locator('.set-prescription')).toContainText('9 reps');
+    await expect(updatedBonus.locator('[data-testid="set-deficit"]')).toContainText('41/50');
+  });
 });

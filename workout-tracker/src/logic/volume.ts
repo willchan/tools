@@ -48,6 +48,18 @@ export interface BonusSetDecision {
 }
 
 /**
+ * How many reps a bonus set for this group should actually ask for, given
+ * how many have been done so far: whatever's still owed, capped at a
+ * normal set's reps (never more — and never negative if cumulative has
+ * already met or passed the target). Shared by the initial add-bonus
+ * decision and by re-syncing an already-pending bonus set after an edit
+ * changes the deficit, so both paths can't drift apart on the formula.
+ */
+export function computeOwedReps(group: VolumeGroup, cumulative: number): number {
+  return Math.min(group.repsPerSet, Math.max(0, group.target - cumulative));
+}
+
+/**
  * After completing a set in a volume group, decide whether to append a
  * bonus set. We only add a bonus when:
  *   1. The group has no remaining scheduled sets.
@@ -87,8 +99,7 @@ export function evaluateBonusSetNeed(
   if (cumulative >= group.target) return { shouldAdd: false, prescribedReps: group.repsPerSet };
   const maxTotal = group.originalCount * 2;
   if (totalInGroup >= maxTotal) return { shouldAdd: false, prescribedReps: group.repsPerSet };
-  const owed = group.target - cumulative;
-  return { shouldAdd: true, prescribedReps: Math.min(group.repsPerSet, owed) };
+  return { shouldAdd: true, prescribedReps: computeOwedReps(group, cumulative) };
 }
 
 export interface VolumeProgress {

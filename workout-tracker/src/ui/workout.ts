@@ -14,7 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionState } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex } from '../logic/volume';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex, computeOwedReps } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { resolveExerciseName } from '../logic/exerciseName';
 import { navigate } from './router';
@@ -519,13 +519,29 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   function reconcileVolumeGroup(groupKey: string) {
     const actualReps = completedSets.map((s) => s.actualReps);
 
+    const group = volumeGroups.get(groupKey);
     const progress = computeVolumeProgress(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
+    const pendingBonusIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
+
     if (progress && progress.cumulative >= progress.target) {
-      const removeIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
-      if (removeIndex !== null) {
-        workoutSets.splice(removeIndex, 1);
-        return;
+      if (pendingBonusIndex !== null) {
+        workoutSets.splice(pendingBonusIndex, 1);
       }
+      return;
+    }
+
+    // A bonus set may already be pending (not yet completed) for this group.
+    // Its owedReps was computed from the deficit at the moment it was added —
+    // if a since-edited earlier set changed that deficit without fully
+    // closing it, keep the pending bonus in sync instead of leaving it stale
+    // (both the displayed prescription and the reps-stepper cap derive from
+    // this value, so a stale owedReps can under- or over-prescribe it).
+    if (group && progress && pendingBonusIndex !== null) {
+      workoutSets[pendingBonusIndex] = {
+        ...workoutSets[pendingBonusIndex],
+        owedReps: computeOwedReps(group, progress.cumulative),
+      };
+      return;
     }
 
     const decision = evaluateBonusSetNeed(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
