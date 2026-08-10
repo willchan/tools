@@ -22,7 +22,7 @@ export function scheduleBackgroundTimerNotification(expectedEndTime: number): vo
     // (getPending/getDeliveredNotifications) rather than trusting an
     // in-memory "did schedule() succeed" flag that a reload would reset.
     void import('@capacitor/local-notifications')
-      .then(async ({ LocalNotifications }) => {
+      .then(({ LocalNotifications }) => {
         // The fixed id means a *delivered* entry from the previous rest
         // timer is still sitting in getDeliveredNotifications() — the OS
         // doesn't clear it just because a new one is scheduled, and nothing
@@ -32,16 +32,25 @@ export function scheduleBackgroundTimerNotification(expectedEndTime: number): vo
         // already alert" check for every timer after the first one that
         // ever actually delivered — including ones whose schedule() below
         // fails, silencing the fallback cue that failure case exists to
-        // trigger. Clear it before scheduling the new one so a later
-        // delivered-notification match can only mean *this* timer fired.
-        // This app only ever has this one kind of notification, so clearing
-        // all delivered ones (rather than filtering by id, which the
-        // plugin's types awkwardly require a title/body for) is equivalent
-        // and simpler. Best-effort: if this rejects, scheduling below still
-        // proceeds — but log it, since a silently-swallowed failure here is
-        // exactly what would leave the stale-entry problem this exists to
+        // trigger. Clear it so a later delivered-notification match can
+        // only mean *this* timer fired. This app only ever has this one
+        // kind of notification, so clearing all delivered ones (rather
+        // than filtering by id, which the plugin's types awkwardly require
+        // a title/body for) is equivalent and simpler.
+        //
+        // Deliberately NOT awaited before schedule() below: it only needs
+        // to land sometime before this timer's own eventual
+        // fireTimerNotification() check (90+ seconds away), not before
+        // scheduling. Gating schedule() behind it previously delayed the
+        // moment this notification actually became pending/cancellable —
+        // long enough that a cancelBackgroundTimerNotification() call
+        // fired immediately after (e.g. skip-timer-btn, or this same test)
+        // could complete *before* schedule() had run, cancelling nothing
+        // and leaving the notification to fire anyway. Best-effort: if
+        // this rejects, log it — a silently-swallowed failure here is
+        // exactly what would leave the stale-entry problem it exists to
         // prevent.
-        await LocalNotifications.removeAllDeliveredNotifications().catch((err: unknown) => {
+        void LocalNotifications.removeAllDeliveredNotifications().catch((err: unknown) => {
           void log(
             'warn',
             `clearing stale delivered timer notification failed: ${errString(err)}`,
