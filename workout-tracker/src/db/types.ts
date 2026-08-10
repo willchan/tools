@@ -14,11 +14,25 @@ export interface TemplateSet {
   tmPercentage: number | null;
   /** Which core lift's TM to use. null for accessories. */
   tmLiftId: string | null;
+  /**
+   * Normal per-set rep prescription. For volume groups (BBB/accessory) this
+   * doubles as part of the group's identity (see getVolumeGroupKey) — a
+   * bonus set keeps this at the group's usual per-set value even when it
+   * owes less, so it still resolves to the same group. Use `owedReps` for
+   * how many reps a bonus set is actually asking for.
+   */
   reps: number;
   /** Whether this is an AMRAP (As Many Reps As Possible) set. */
   isAmrap: boolean;
   /** True for runtime-added bonus sets that compensate for missed volume reps. */
   isBonus?: boolean;
+  /**
+   * Bonus sets only: reps still owed to close the group's deficit, capped
+   * at `reps` (never more than a normal set). Undefined means "the full
+   * `reps` value" — every non-bonus set, and any bonus set that happens to
+   * owe a full set's worth.
+   */
+  owedReps?: number;
 }
 
 export interface TemplateDay {

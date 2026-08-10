@@ -4,9 +4,10 @@ import type { TemplateSet } from '../db/types';
  * Volume groups: a "volume group" is a run of accessory or BBB-style sets
  * sharing the same exercise, percentage, and reps. The group has a TOTAL
  * rep target (count × reps). If you fall short across the prescribed sets,
- * extra "bonus" sets are appended at the original per-set reps until the
- * total target is reached or the bonus cap is hit. Main 5/3/1 sets are
- * NOT volume — those use TM-based progression, not rep-total compensation.
+ * extra "bonus" sets are appended — each prescribed only the reps still
+ * owed (capped at the original per-set reps) — until the total target is
+ * reached or the bonus cap is hit. Main 5/3/1 sets are NOT volume — those
+ * use TM-based progression, not rep-total compensation.
  */
 
 export interface VolumeGroup {
@@ -47,12 +48,29 @@ export interface BonusSetDecision {
 }
 
 /**
+ * How many reps a bonus set for this group should actually ask for, given
+ * how many have been done so far: whatever's still owed, capped at a
+ * normal set's reps (never more — and never negative if cumulative has
+ * already met or passed the target). Shared by the initial add-bonus
+ * decision and by re-syncing an already-pending bonus set after an edit
+ * changes the deficit, so both paths can't drift apart on the formula.
+ */
+export function computeOwedReps(group: VolumeGroup, cumulative: number): number {
+  return Math.min(group.repsPerSet, Math.max(0, group.target - cumulative));
+}
+
+/**
  * After completing a set in a volume group, decide whether to append a
  * bonus set. We only add a bonus when:
  *   1. The group has no remaining scheduled sets.
  *   2. The cumulative actual reps still fall short of the group target.
  *   3. We haven't hit the bonus cap (originalCount more bonus sets — i.e.,
  *      the group can at most double in size).
+ *
+ * The bonus set is prescribed exactly the reps still owed, capped at the
+ * group's normal per-set reps — never more (that's still just one set) and
+ * never the full per-set amount when less would already close the gap, so
+ * the prescription on screen matches what "0 to go" actually requires.
  */
 export function evaluateBonusSetNeed(
   groupKey: string,
@@ -81,7 +99,7 @@ export function evaluateBonusSetNeed(
   if (cumulative >= group.target) return { shouldAdd: false, prescribedReps: group.repsPerSet };
   const maxTotal = group.originalCount * 2;
   if (totalInGroup >= maxTotal) return { shouldAdd: false, prescribedReps: group.repsPerSet };
-  return { shouldAdd: true, prescribedReps: group.repsPerSet };
+  return { shouldAdd: true, prescribedReps: computeOwedReps(group, cumulative) };
 }
 
 export interface VolumeProgress {

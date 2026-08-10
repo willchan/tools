@@ -14,7 +14,7 @@ import {
 import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionState } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex } from '../logic/volume';
+import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex, computeOwedReps } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { resolveExerciseName } from '../logic/exerciseName';
 import { navigate } from './router';
@@ -269,16 +269,22 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       setEl.dataset.testid = `set-${idx}`;
       if (set.isBonus) setEl.dataset.bonus = 'true';
 
-      let repsDisplay = `${set.reps} reps`;
+      // A bonus set may owe fewer reps than a normal set of this exercise
+      // (e.g. only 3 more needed to close the deficit) — prescribe exactly
+      // that, not the full per-set count.
+      const effectiveReps = set.owedReps ?? set.reps;
+
+      let repsDisplay = `${effectiveReps} reps`;
       if (set.isAmrap) repsDisplay += '+';
       if (set.isBonus) repsDisplay += ' (bonus)';
 
+      // Shown on every set in a volume group (not just bonus sets) — once a
+      // set falls short, the running total lets you tell how much you still
+      // owe well before you reach the make-up bonus sets at the end.
       let deficitDisplay = '';
-      if (set.isBonus) {
-        const groupKey = getVolumeGroupKey(set);
-        const progress = groupKey
-          ? computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups)
-          : null;
+      const groupKey = getVolumeGroupKey(set);
+      if (groupKey) {
+        const progress = computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups);
         if (progress) {
           const remaining = Math.max(0, progress.target - progress.cumulative);
           deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
@@ -301,7 +307,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
               ${plateDisplay}
             </div>
             <div class="set-actions">
-              <div class="reps-stepper" data-testid="edit-reps-stepper" data-max="${set.isAmrap ? 999 : set.reps}">
+              <div class="reps-stepper" data-testid="edit-reps-stepper" data-max="${set.isAmrap ? 999 : effectiveReps}">
                 <span class="stepper-label">Reps:</span>
                 <button class="stepper-btn" data-testid="edit-stepper-dec" aria-label="Fewer reps">−</button>
                 <span class="stepper-value" data-testid="edit-stepper-value">${completed.actualReps}</span>
@@ -355,10 +361,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
               ${deficitDisplay}
             </div>
             <div class="set-actions">
-              <div class="reps-stepper hidden" data-testid="reps-stepper" data-max="${set.reps}">
+              <div class="reps-stepper hidden" data-testid="reps-stepper" data-max="${effectiveReps}">
                 <span class="stepper-label">Reps:</span>
                 <button class="stepper-btn" data-testid="stepper-dec" aria-label="Fewer reps">−</button>
-                <span class="stepper-value" data-testid="stepper-value">${set.reps}</span>
+                <span class="stepper-value" data-testid="stepper-value">${effectiveReps}</span>
                 <button class="stepper-btn" data-testid="stepper-inc" aria-label="More reps">+</button>
               </div>
               <button class="btn btn-primary done-set-btn" data-testid="done-set-btn">Done</button>
@@ -513,13 +519,29 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   function reconcileVolumeGroup(groupKey: string) {
     const actualReps = completedSets.map((s) => s.actualReps);
 
+    const group = volumeGroups.get(groupKey);
     const progress = computeVolumeProgress(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
+    const pendingBonusIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
+
     if (progress && progress.cumulative >= progress.target) {
-      const removeIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
-      if (removeIndex !== null) {
-        workoutSets.splice(removeIndex, 1);
-        return;
+      if (pendingBonusIndex !== null) {
+        workoutSets.splice(pendingBonusIndex, 1);
       }
+      return;
+    }
+
+    // A bonus set may already be pending (not yet completed) for this group.
+    // Its owedReps was computed from the deficit at the moment it was added —
+    // if a since-edited earlier set changed that deficit without fully
+    // closing it, keep the pending bonus in sync instead of leaving it stale
+    // (both the displayed prescription and the reps-stepper cap derive from
+    // this value, so a stale owedReps can under- or over-prescribe it).
+    if (group && progress && pendingBonusIndex !== null) {
+      workoutSets[pendingBonusIndex] = {
+        ...workoutSets[pendingBonusIndex],
+        owedReps: computeOwedReps(group, progress.cumulative),
+      };
+      return;
     }
 
     const decision = evaluateBonusSetNeed(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
@@ -532,7 +554,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         exerciseId: groupSet.exerciseId,
         tmPercentage: groupSet.tmPercentage,
         tmLiftId: groupSet.tmLiftId,
-        reps: decision.prescribedReps,
+        // `reps` stays at the group's normal per-set value (not the owed
+        // amount) so this bonus set still resolves to the same volume
+        // group — getVolumeGroupKey folds `reps` into the group identity.
+        reps: groupSet.reps,
+        owedReps: decision.prescribedReps,
         isAmrap: false,
         isBonus: true,
       });
@@ -542,17 +568,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   async function markSetDone() {
     const set = workoutSets[currentSetIndex];
     const weight = getSetWeight(set, tmMap);
+    // A bonus set may be prescribed fewer reps than a normal set (see
+    // reconcileVolumeGroup) — that's what "done, unedited" and the missed-
+    // reps comparison should measure against, not the full per-set count.
+    const effectiveReps = set.owedReps ?? set.reps;
 
-    let actualReps = set.reps;
+    let actualReps = effectiveReps;
     const stepperValue = setsContainer.querySelector('[data-testid="stepper-value"]') as HTMLElement | null;
     if (stepperValue) {
       actualReps = parseInt(stepperValue.textContent || '', 10);
-      if (isNaN(actualReps)) actualReps = set.reps;
+      if (isNaN(actualReps)) actualReps = effectiveReps;
     }
 
     completedSets.push({
       exerciseId: set.exerciseId,
-      prescribedReps: set.reps,
+      prescribedReps: effectiveReps,
       actualReps,
       weight,
       isAmrap: set.isAmrap,

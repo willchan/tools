@@ -114,7 +114,7 @@ test.describe('Volume deficit — unit logic', () => {
     expect(decision.shouldAdd).toBe(false);
   });
 
-  test('evaluateBonusSetNeed adds when last scheduled set leaves deficit', async ({ page }) => {
+  test('evaluateBonusSetNeed adds when last scheduled set leaves deficit, prescribed to the reps still owed', async ({ page }) => {
     const decision = await page.evaluate(async () => {
       const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
       const sets = [
@@ -126,6 +126,23 @@ test.describe('Volume deficit — unit logic', () => {
       return evaluateBonusSetNeed('pullup|null|10', sets, [10, 10, 5], 3, groups);
     });
     expect(decision.shouldAdd).toBe(true);
+    // Target 30, done 25 → only 5 owed, even though a normal set here is 10.
+    expect(decision.prescribedReps).toBe(5);
+  });
+
+  test('evaluateBonusSetNeed caps prescribed reps at the normal per-set reps when more than a full set is owed', async ({ page }) => {
+    const decision = await page.evaluate(async () => {
+      const { evaluateBonusSetNeed, computeVolumeGroups } = await import('/src/logic/volume.ts');
+      const sets = [
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+        { exerciseId: 'pullup', tmPercentage: null, tmLiftId: null, reps: 10, isAmrap: false },
+      ];
+      const groups = computeVolumeGroups(sets);
+      return evaluateBonusSetNeed('pullup|null|10', sets, [0, 0, 0], 3, groups);
+    });
+    expect(decision.shouldAdd).toBe(true);
+    // Target 30, done 0 → 30 owed, but a single bonus set still only asks for 10.
     expect(decision.prescribedReps).toBe(10);
   });
 
@@ -245,17 +262,37 @@ test.describe('Volume deficit — workout flow', () => {
     await expect(page.locator('.set-item')).toHaveCount(14);
   });
 
-  test('missing reps in the last BBB set adds a bonus set at original reps', async ({ page }) => {
+  test('running deficit is visible on ordinary (non-bonus) sets in a volume group, not just bonus sets', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1: log 6/10. Total so far = 6/50.
+    await logSetWithReps(page, 6, 10);
+
+    // BBB 2 is now current and isn't a bonus set — the deficit should still
+    // show, so a shortfall is visible well before the group's originally
+    // scheduled sets run out and a bonus set gets appended.
+    const current = page.locator('.set-item.current');
+    await expect(current).not.toHaveAttribute('data-bonus', 'true');
+    const deficit = current.locator('[data-testid="set-deficit"]');
+    await expect(deficit).toContainText('6/50');
+    await expect(deficit).toContainText('44 to go');
+
+    // The still-upcoming BBB 3 (not yet current) should show it too.
+    const upcoming = page.locator('.set-item').nth(5);
+    await expect(upcoming.locator('[data-testid="set-deficit"]')).toContainText('6/50');
+  });
+
+  test('missing reps in the last BBB set adds a bonus set prescribed only the reps still owed', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1-4 at full
     for (let i = 0; i < 4; i++) await completeSet(page);
     // BBB 5: log 6/10. Total = 46 < 50.
     await logSetWithReps(page, 6, 10);
 
-    // A bonus BBB squat set should be the new current set.
+    // A bonus BBB squat set should be the new current set, asking for just
+    // the 4 reps still owed rather than a full 10.
     const current = page.locator('.set-item.current');
     await expect(current.locator('.set-exercise')).toContainText('squat');
-    await expect(current.locator('.set-prescription')).toContainText('10');
+    await expect(current.locator('.set-prescription')).toContainText('4 reps');
     await expect(current.locator('.set-prescription')).toContainText('bonus');
     // One bonus set added — total grew from 14 to 15.
     await expect(page.locator('.set-item')).toHaveCount(15);
@@ -325,8 +362,9 @@ test.describe('Volume deficit — workout flow', () => {
     // BBB 1-4 at full, BBB 5 short (6/10) → bonus appears
     for (let i = 0; i < 4; i++) await completeSet(page);
     await logSetWithReps(page, 6, 10);
-    // Bonus: do 4 reps. Total = 50.
-    await logSetWithReps(page, 4, 10);
+    // Bonus is prescribed exactly the 4 reps still owed — complete it at
+    // full to land on the 50 target.
+    await completeSet(page);
     // Continue accessories at full
     for (let i = 0; i < 6; i++) await completeSet(page);
 
