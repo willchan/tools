@@ -643,8 +643,8 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   // notifications.ts's fireTimerNotification. Centralized here (rather than
   // duplicated at each expiry call site) so this ordering can't be broken by
   // fixing it in one place and not another.
-  function notifyTimerExpired() {
-    fireTimerNotification();
+  async function notifyTimerExpired() {
+    await fireTimerNotification();
     cancelBackgroundTimerNotification();
   }
 
@@ -698,7 +698,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         await putTimerState(null);
         setDoneButtonDisabled(false);
         syncLiveActivity(null);
-        notifyTimerExpired();
+        await notifyTimerExpired();
         showTimerExpired(timerEl);
       }
     };
@@ -952,7 +952,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       await putTimerState(null);
       setDoneButtonDisabled(false);
       syncLiveActivity(null);
-      notifyTimerExpired();
+      await notifyTimerExpired();
       showTimerExpired(timerEl);
     })();
   };
@@ -987,13 +987,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           await putTimerState(null);
           setDoneButtonDisabled(false);
           syncLiveActivity(null);
-          notifyTimerExpired();
+          await notifyTimerExpired();
           showTimerExpired(timerEl);
         }
       }, 250);
     } else {
       await putTimerState(null);
-      notifyTimerExpired();
+      await notifyTimerExpired();
       timerEl.classList.add('hidden');
     }
   }

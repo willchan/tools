@@ -148,6 +148,64 @@ test.describe('Native rest-timer notifications', () => {
     });
     expect(granted).toBe(true);
   });
+
+  /**
+   * Regression test: fireTimerNotification() used to play the client-side
+   * haptic + Web Audio beep unconditionally on native, on top of the OS
+   * local notification scheduled by scheduleBackgroundTimerNotification()
+   * (which has its own sound + system alert vibration and fires from the OS
+   * clock, not this JS). notifyTimerExpired() only tries to cancel that
+   * scheduled notification *after* detecting expiry — at or after the same
+   * instant the OS notification is due — so the cancel essentially never
+   * won the race, and every timer completion produced two audible/haptic
+   * alerts. When the OS will actually alert (permission granted, as this
+   * suite's beforeEach sets up), the client-side cue must be skipped.
+   */
+  test('skips the client-side haptic/beep when the OS notification will already alert', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __vibrateCalls: unknown[] }).__vibrateCalls = [];
+      Object.defineProperty(window.navigator, 'vibrate', {
+        value: (pattern: number | number[]) => {
+          (window as unknown as { __vibrateCalls: unknown[] }).__vibrateCalls.push(pattern);
+          return true;
+        },
+        configurable: true,
+      });
+
+      (window as unknown as { __oscillatorCount: number }).__oscillatorCount = 0;
+      const OrigAudioContext = (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext;
+      if (OrigAudioContext) {
+        class TrackedAudioContext extends OrigAudioContext {
+          createOscillator(...args: Parameters<AudioContext['createOscillator']>) {
+            (window as unknown as { __oscillatorCount: number }).__oscillatorCount++;
+            return super.createOscillator(...args);
+          }
+        }
+        (window as unknown as { AudioContext: typeof AudioContext }).AudioContext =
+          TrackedAudioContext as unknown as typeof AudioContext;
+      }
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    await page.evaluate(async () => {
+      const { fireTimerNotification } = await import('/src/ui/notifications.ts');
+      await fireTimerNotification();
+    });
+
+    // Give a wrongly-unconditional haptics/beep call a chance to fire.
+    await page.waitForTimeout(300);
+
+    const vibrateCalls = await page.evaluate(
+      () => (window as unknown as { __vibrateCalls: unknown[] }).__vibrateCalls,
+    );
+    const oscillatorCount = await page.evaluate(
+      () => (window as unknown as { __oscillatorCount: number }).__oscillatorCount,
+    );
+    expect(vibrateCalls).toHaveLength(0);
+    expect(oscillatorCount).toBe(0);
+  });
 });
 
 test.describe('Native haptics', () => {
@@ -168,7 +226,7 @@ test.describe('Native haptics', () => {
 
     await page.evaluate(async () => {
       const { fireTimerNotification } = await import('/src/ui/notifications.ts');
-      fireTimerNotification();
+      await fireTimerNotification();
     });
 
     await page.waitForFunction(

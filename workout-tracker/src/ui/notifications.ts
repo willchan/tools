@@ -160,17 +160,47 @@ function playBeepPattern(): void {
   }
 }
 
-export function fireTimerNotification(): void {
+export async function fireTimerNotification(): Promise<void> {
   if (isNativePlatform()) {
-    // navigator.vibrate is unimplemented in WebKit, so the native app gets
-    // real Taptic Engine feedback here instead of the (silently no-op) call
-    // in the web branch below.
-    void import('@capacitor/haptics')
-      .then(({ Haptics, NotificationType }) => Haptics.notification({ type: NotificationType.Success }))
-      .catch((err: unknown) => {
-        void log('warn', `haptics failed: ${err instanceof Error ? err.message : String(err)}`);
-      });
-  } else if ('vibrate' in navigator) {
+    // The native branch scheduled a real OS local notification for this
+    // exact expiry (see scheduleBackgroundTimerNotification) — it has its
+    // own sound (timer-done.wav) and system-default alert vibration, and it
+    // fires from the OS clock regardless of whether this JS is even running.
+    // notifyTimerExpired() only gets a chance to cancel it *after* detecting
+    // expiry here — i.e. at or after the same instant the OS notification is
+    // scheduled to fire — so that cancel essentially never wins the race.
+    // Playing our own haptic + beep unconditionally on top of that produced
+    // a guaranteed double alert on every timer completion. Check whether the
+    // OS notification will actually alert the user first; only fall back to
+    // our own cue when it won't (permission not granted, so nothing else
+    // will sound).
+    let osWillAlert = false;
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      const status = await LocalNotifications.checkPermissions();
+      osWillAlert = status.display === 'granted';
+    } catch (err) {
+      void log(
+        'warn',
+        `native notification permission check failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if (!osWillAlert) {
+      // navigator.vibrate is unimplemented in WebKit, so the native app gets
+      // real Taptic Engine feedback here instead of the (silently no-op)
+      // call in the web branch below.
+      void import('@capacitor/haptics')
+        .then(({ Haptics, NotificationType }) => Haptics.notification({ type: NotificationType.Success }))
+        .catch((err: unknown) => {
+          void log('warn', `haptics failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      playBeepPattern();
+    }
+    return;
+  }
+
+  if ('vibrate' in navigator) {
     navigator.vibrate([200, 100, 200, 100, 200]);
   }
 
