@@ -70,15 +70,31 @@ test.describe('Native rest-timer notifications', () => {
     await page.addInitScript(() => {
       (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
       (window as unknown as { __notificationCalls: unknown[] }).__notificationCalls = [];
-      class FakeNotification {
+      // Extends the real EventTarget (rather than a bare class) because
+      // @capacitor/local-notifications' web fallback calls
+      // addEventListener('click'/'show'/'close', ...) on every constructed
+      // Notification before recording it as delivered — a bare stub without
+      // that method throws there, silently short-circuiting before the
+      // delivered-notifications bookkeeping this suite's tests rely on. It
+      // also calls .close() on each when clearing delivered notifications
+      // (removeAllDeliveredNotifications), so that's stubbed too.
+      class FakeNotification extends EventTarget {
         static permission = 'granted';
         static requestPermission = async () => 'granted';
+        title: string;
+        body?: string;
+        tag?: string;
         constructor(title: string, options?: { body?: string; tag?: string }) {
+          super();
+          this.title = title;
+          this.body = options?.body;
+          this.tag = options?.tag;
           (window as unknown as { __notificationCalls: unknown[] }).__notificationCalls.push({
             title,
             ...options,
           });
         }
+        close() {}
       }
       (window as unknown as { Notification: unknown }).Notification = FakeNotification;
     });
@@ -148,6 +164,149 @@ test.describe('Native rest-timer notifications', () => {
     });
     expect(granted).toBe(true);
   });
+
+  /**
+   * Regression test: fireTimerNotification() used to play the client-side
+   * haptic + Web Audio beep unconditionally on native, on top of the OS
+   * local notification scheduled by scheduleBackgroundTimerNotification()
+   * (which has its own sound + system alert vibration and fires from the OS
+   * clock, not this JS). notifyTimerExpired() only tries to cancel that
+   * scheduled notification *after* detecting expiry — at or after the same
+   * instant the OS notification is due — so the cancel essentially never
+   * won the race, and every timer completion produced two audible/haptic
+   * alerts. When the OS will actually alert — permission granted (this
+   * suite's beforeEach sets up) *and* the notification for this specific
+   * timer was actually scheduled — the client-side cue must be skipped.
+   */
+  test('skips the client-side haptic/beep when the OS notification will already alert', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __vibrateCalls: unknown[] }).__vibrateCalls = [];
+      Object.defineProperty(window.navigator, 'vibrate', {
+        value: (pattern: number | number[]) => {
+          (window as unknown as { __vibrateCalls: unknown[] }).__vibrateCalls.push(pattern);
+          return true;
+        },
+        configurable: true,
+      });
+
+      (window as unknown as { __oscillatorCount: number }).__oscillatorCount = 0;
+      const OrigAudioContext = (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext;
+      if (OrigAudioContext) {
+        class TrackedAudioContext extends OrigAudioContext {
+          createOscillator(...args: Parameters<AudioContext['createOscillator']>) {
+            (window as unknown as { __oscillatorCount: number }).__oscillatorCount++;
+            return super.createOscillator(...args);
+          }
+        }
+        (window as unknown as { AudioContext: typeof AudioContext }).AudioContext =
+          TrackedAudioContext as unknown as typeof AudioContext;
+      }
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    await page.evaluate(async () => {
+      const { requestNotificationPermission, scheduleBackgroundTimerNotification, fireTimerNotification } =
+        await import('/src/ui/notifications.ts');
+      // Real usage always schedules before a timer can expire — fireTimerNotification()
+      // only treats the OS as "will alert" once that schedule() call actually
+      // resolved. Load the plugin singleton first (see the "cancelling before the
+      // fire time" test above for why), then schedule far enough out that it won't
+      // itself fire during this test, and give its internal promise chain a tick to
+      // resolve before asking whether the OS will alert.
+      await requestNotificationPermission();
+      scheduleBackgroundTimerNotification(Date.now() + 60_000);
+      // scheduleBackgroundTimerNotification() is fire-and-forget — give its
+      // internal import()+schedule() chain time to actually land in the
+      // plugin's pending list before asking whether the OS will alert.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await fireTimerNotification();
+    });
+
+    // Give a wrongly-unconditional haptics/beep call a chance to fire.
+    await page.waitForTimeout(300);
+
+    const vibrateCalls = await page.evaluate(
+      () => (window as unknown as { __vibrateCalls: unknown[] }).__vibrateCalls,
+    );
+    const oscillatorCount = await page.evaluate(
+      () => (window as unknown as { __oscillatorCount: number }).__oscillatorCount,
+    );
+    expect(vibrateCalls).toHaveLength(0);
+    expect(oscillatorCount).toBe(0);
+  });
+
+  /**
+   * Regression test: fireTimerNotification()'s "will the OS alert" check
+   * uses getDeliveredNotifications() to detect that a timer's notification
+   * already fired — but the OS never clears a delivered entry just because
+   * a new timer starts, and this codebase's fixed notification id means the
+   * *previous* timer's delivered entry would otherwise still be sitting
+   * there. Left unhandled, that stale entry would permanently satisfy the
+   * check for every later timer — including one whose own schedule() call
+   * failed — leaving a fully silent expiry (no OS notification, and the
+   * client-side fallback wrongly skipped too, since it'd wrongly conclude
+   * the OS already alerted). scheduleBackgroundTimerNotification() must
+   * clear any stale delivered entry before scheduling the new one.
+   *
+   * This asserts the clearing mechanism itself, via
+   * window.Capacitor.Plugins.LocalNotifications — reachable directly once
+   * our own import() below has triggered Capacitor's core to cache it
+   * there, unlike a fresh bare `import('@capacitor/local-notifications')`
+   * from page.evaluate() (not Vite-transformed, so bare specifiers don't
+   * resolve; see the "cancelling before the fire time" test above). Simply
+   * *reading* through the plugin proxy this way works fine — it's only
+   * property *writes* (e.g. overriding a method) the proxy's `get` trap
+   * ignores, always regenerating the real method wrapper regardless.
+   */
+  test('scheduling a new timer clears a stale delivered notification from a previous one', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    await page.evaluate(async () => {
+      const { requestNotificationPermission, scheduleBackgroundTimerNotification } =
+        await import('/src/ui/notifications.ts');
+      await requestNotificationPermission();
+      // Timer 1: schedule for the very near future so it actually fires and
+      // lands in the OS's delivered-notifications list for real.
+      scheduleBackgroundTimerNotification(Date.now() + 50);
+    });
+
+    // Let timer 1 actually deliver.
+    await page.waitForFunction(
+      () => (window as unknown as { __notificationCalls: unknown[] }).__notificationCalls.length > 0,
+    );
+
+    const deliveredAfterTimer1 = await page.evaluate(async () => {
+      const LocalNotifications = (
+        window as unknown as {
+          Capacitor: { Plugins: { LocalNotifications: { getDeliveredNotifications: () => Promise<{ notifications: unknown[] }> } } };
+        }
+      ).Capacitor.Plugins.LocalNotifications;
+      return (await LocalNotifications.getDeliveredNotifications()).notifications.length;
+    });
+    expect(deliveredAfterTimer1).toBeGreaterThan(0);
+
+    await page.evaluate(async () => {
+      const { scheduleBackgroundTimerNotification } = await import('/src/ui/notifications.ts');
+      // Timer 2 — far enough out that it won't itself fire during this test.
+      scheduleBackgroundTimerNotification(Date.now() + 60_000);
+      // scheduleBackgroundTimerNotification() is fire-and-forget; give its
+      // internal clear-then-schedule chain time to actually run.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+
+    const deliveredAfterTimer2Scheduled = await page.evaluate(async () => {
+      const LocalNotifications = (
+        window as unknown as {
+          Capacitor: { Plugins: { LocalNotifications: { getDeliveredNotifications: () => Promise<{ notifications: unknown[] }> } } };
+        }
+      ).Capacitor.Plugins.LocalNotifications;
+      return (await LocalNotifications.getDeliveredNotifications()).notifications.length;
+    });
+    expect(deliveredAfterTimer2Scheduled).toBe(0);
+  });
 });
 
 test.describe('Native haptics', () => {
@@ -168,7 +327,7 @@ test.describe('Native haptics', () => {
 
     await page.evaluate(async () => {
       const { fireTimerNotification } = await import('/src/ui/notifications.ts');
-      fireTimerNotification();
+      await fireTimerNotification();
     });
 
     await page.waitForFunction(

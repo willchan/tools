@@ -173,6 +173,27 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   let workoutStartTime = Date.now();
   let timerExpiredTimeout: ReturnType<typeof setTimeout> | null = null;
   let timerExpiredClickDismiss: (() => void) | null = null;
+  // Three independent places within *this* render can notice a rest timer
+  // hit zero — the 250ms poll in startRestTimer's updateTimer, the
+  // resumed-timer recovery interval set up when this render finds an
+  // in-progress timer, and the visibilitychange reconciler. Each does its
+  // own `await getTimerState()` before deciding to act, so two of them can
+  // both read the timer as still-expired-but-present before either has
+  // written it back to null — this flag is checked-and-set synchronously
+  // (no await in between) right after that read, so only the first one to
+  // get there actually handles the expiry. Reset whenever a new rest period
+  // starts, so a later, distinct expiry can be handled again.
+  //
+  // Deliberately scoped per-renderWorkout()-call (not module-level): a
+  // second render of this same route (e.g. the user leaves via a native
+  // back-navigation that bypasses #back-btn's cleanup, then returns) can
+  // leave a *previous* render's detectors still running against detached
+  // DOM. A module-level flag would let that stale render's detector win the
+  // race and permanently block the live render's own detector from ever
+  // updating the visible page. Scoping it here means each render's
+  // detectors only ever race against each other, never against a different
+  // render's.
+  let timerExpiryHandled = false;
   // Rest-timer end time as last reported to the Live Activity (native-only;
   // no-op on web). Tracked separately from the DOM/IndexedDB timer state so
   // the activity payload can be rebuilt on demand without re-reading either.
@@ -665,17 +686,81 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     if (doneBtn) doneBtn.disabled = disabled;
   }
 
-  // fireTimerNotification() must run before cancelBackgroundTimerNotification()
-  // — it's what actually notifies the SW (via TIMER_DONE, deduped against its
-  // own setTimeout) that this timer is done. Cancelling first would race: if
-  // the SW's setTimeout hadn't fired yet, cancelling it here would silence the
-  // only pending trigger before TIMER_DONE arrives to replace it. See
-  // notifications.ts's fireTimerNotification. Centralized here (rather than
-  // duplicated at each expiry call site) so this ordering can't be broken by
-  // fixing it in one place and not another.
-  function notifyTimerExpired() {
-    fireTimerNotification();
-    cancelBackgroundTimerNotification();
+  // fireTimerNotification() decides whether an OS/SW notification already
+  // covers this expiry and returns whether cancelBackgroundTimerNotification()
+  // is still warranted — see that function's own comment for why it isn't
+  // simply "always" on native (cancelling a notification we've just decided
+  // to trust would silently prevent it from ever firing). Centralized here
+  // (rather than duplicated at each expiry call site) so this can't be
+  // broken by fixing it in one place and not another.
+  async function notifyTimerExpired() {
+    const shouldCancel = await fireTimerNotification();
+    if (shouldCancel) {
+      await cancelBackgroundTimerNotification();
+    }
+  }
+
+  // The single place that clears a completed rest timer's state and fires
+  // the expiry alert. Four independent detectors can notice an expiry (the
+  // 250ms poll below, the resumed-timer recovery interval, the
+  // visibilitychange reconciler, and the already-expired-on-mount check) —
+  // routing all of them through here, guarded by timerExpiryHandled (see its
+  // declaration), keeps that sequence from silently drifting out of sync
+  // across call sites the way notifyTimerExpired's own comment above warns
+  // about.
+  //
+  // isLiveExpiry distinguishes two genuinely different situations, not just
+  // a formatting choice, and both consequences of it (the "Time's Up!"
+  // banner vs. silent hide, and syncing isResting/the Live Activity vs.
+  // not) always move together — hence one parameter, not two. `true` is for
+  // an expiry this page instance watched happen in real time (the poll, the
+  // recovery interval, or visibilitychange catching one just missed) — the
+  // banner is useful there, and the done button/Live Activity are already
+  // wired up from earlier in this same render. `false` is for a timer
+  // already expired when the page loads: it's cleared silently (see
+  // e2e/timer-notification.spec.ts's "fires notification when re-rendering
+  // with an already-expired timer", which asserts #rest-timer stays hidden
+  // for that case) and skips syncing the done button/Live Activity, since at
+  // that point in renderWorkout() startWorkoutActivity() hasn't even run yet
+  // for this render — syncLiveActivity(null) would call updateActivity() for
+  // an activity that doesn't exist yet (harmless, just log noise) and
+  // there's no done button in the DOM yet to disable/enable either.
+  async function handleTimerExpiry(isLiveExpiry: boolean) {
+    if (timerExpiryHandled) return;
+    timerExpiryHandled = true;
+    try {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      await putTimerState(null);
+      if (isLiveExpiry) {
+        setDoneButtonDisabled(false);
+        syncLiveActivity(null);
+      }
+      // UI feedback first, synchronously — showTimerExpired()/hiding the
+      // timer shouldn't wait on notifyTimerExpired()'s native permission
+      // check.
+      if (isLiveExpiry) {
+        showTimerExpired(timerEl);
+      } else {
+        timerEl.classList.add('hidden');
+      }
+      await notifyTimerExpired();
+    } catch (err) {
+      // A failure partway through (e.g. putTimerState(null) rejecting on a
+      // blocked/quota-exceeded IndexedDB transaction) must not leave
+      // timerExpiryHandled stuck true — that would permanently stop every
+      // other detector from ever retrying this expiry for the rest of the
+      // render, freezing the countdown with no alert ever firing. Let the
+      // next detector tick try again.
+      timerExpiryHandled = false;
+      void logEvent(
+        'warn',
+        'timer expiry handling failed',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   async function startRestTimer(restSeconds = settings.restTimerSeconds) {
@@ -693,6 +778,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     delete timerEl.dataset.testid;
     const skipBtnEl = document.getElementById('skip-timer-btn');
     if (skipBtnEl) skipBtnEl.classList.remove('hidden');
+
+    // A fresh timer means any previous expiry is done being handled — allow
+    // this new one's eventual expiry to be handled too.
+    timerExpiryHandled = false;
 
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
@@ -723,13 +812,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
       if (remaining <= 0) {
         timerCompleting = true;
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = null;
-        await putTimerState(null);
-        setDoneButtonDisabled(false);
-        syncLiveActivity(null);
-        notifyTimerExpired();
-        showTimerExpired(timerEl);
+        await handleTimerExpiry(true);
       }
     };
 
@@ -975,15 +1058,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     void (async () => {
       const saved = await getTimerState();
       if (!saved || getRemainingMs(saved) > 0) return;
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-      await putTimerState(null);
-      setDoneButtonDisabled(false);
-      syncLiveActivity(null);
-      notifyTimerExpired();
-      showTimerExpired(timerEl);
+      await handleTimerExpiry(true);
     })();
   };
   document.addEventListener('visibilitychange', onVisibilityReconcile);
@@ -998,6 +1073,17 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       liveActivityRestEndTime = existingTimer.expectedEndTime;
       timerEl.classList.remove('hidden');
       setDoneButtonDisabled(true);
+      // timerInterval is shared module state — if a previous render left
+      // its own interval running (e.g. the user left via a raw route change
+      // that bypassed #back-btn's cleanup, not this render's fault to
+      // clean up otherwise), it's still ticking against that render's own
+      // (now detached) DOM. Overwriting timerInterval below without first
+      // clearing it would orphan that stale interval rather than stop it —
+      // it keeps running, and when it later notices the same expiry and
+      // clears "timerInterval" itself, it would cancel *this* render's
+      // interval instead (they're the same shared variable), silently
+      // killing the live detector.
+      if (timerInterval) clearInterval(timerInterval);
       let recoveryCompleting = false;
       timerInterval = setInterval(async () => {
         if (recoveryCompleting) return;
@@ -1012,19 +1098,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         if (tv) tv.textContent = formatTime(r);
         if (r <= 0) {
           recoveryCompleting = true;
-          if (timerInterval) clearInterval(timerInterval);
-          timerInterval = null;
-          await putTimerState(null);
-          setDoneButtonDisabled(false);
-          syncLiveActivity(null);
-          notifyTimerExpired();
-          showTimerExpired(timerEl);
+          await handleTimerExpiry(true);
         }
       }, 250);
     } else {
-      await putTimerState(null);
-      notifyTimerExpired();
-      timerEl.classList.add('hidden');
+      await handleTimerExpiry(false);
     }
   }
 

@@ -85,4 +85,71 @@ test.describe('Rest timer reconciliation on visibilitychange', () => {
       { timeout: 2000 },
     );
   });
+
+  /**
+   * Each expiry detector (the 250ms poll, the resumed-timer recovery
+   * interval, and this visibilitychange reconciler) independently does
+   * `await getTimerState()` before deciding to act. Racing wall-clock
+   * timing against the *poll* to prove that isn't reliable — whether a
+   * second detector's read lands before the first one's write depends on
+   * scheduling details that don't reproduce deterministically. Dispatching
+   * `visibilitychange` twice back-to-back with no `await` in between forces
+   * the same shape of race deterministically: both onVisibilityReconcile
+   * invocations start their `getTimerState()` read in the same tick, before
+   * either has had a chance to write the timer back to null. Without a
+   * shared guard, both would proceed to call notifyTimerExpired(),
+   * doubling the alert.
+   */
+  test('two overlapping reconcile invocations for the same expiry alert only once', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __vibrateCount: number }).__vibrateCount = 0;
+      Object.defineProperty(navigator, 'vibrate', {
+        value: () => {
+          (window as unknown as { __vibrateCount: number }).__vibrateCount++;
+          return true;
+        },
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    await page.click('[data-testid="done-set-btn"]');
+    await expect(page.locator('#rest-timer')).toBeVisible();
+
+    // Reset the count after the click — Done's own audio-priming can vibrate
+    // on some configs, and that's not what this test is measuring.
+    await page.evaluate(() => {
+      (window as unknown as { __vibrateCount: number }).__vibrateCount = 0;
+    });
+
+    await page.evaluate(async () => {
+      const { putTimerState } = await import('/src/db/database.ts');
+      await putTimerState({ expectedEndTime: Date.now() - 1000, durationMs: 90000 });
+    });
+
+    // Two dispatches, back-to-back, with no await between them: both
+    // listener invocations begin their async getTimerState() read in the
+    // same synchronous turn, before either can have written the timer back
+    // to null yet.
+    await page.evaluate(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await page.waitForFunction(
+      () => (window as unknown as { __vibrateCount: number }).__vibrateCount > 0,
+      null,
+      { timeout: 3000 },
+    );
+    // Give a wrongly-unguarded second invocation time to also fire.
+    await page.waitForTimeout(500);
+
+    const count = await page.evaluate(() => (window as unknown as { __vibrateCount: number }).__vibrateCount);
+    expect(count).toBe(1);
+  });
 });
