@@ -281,6 +281,26 @@ test.describe('Volume deficit — workout flow', () => {
     await expect(upcoming.locator('[data-testid="set-deficit"]')).toContainText('6/50');
   });
 
+  test('deficit only appears on the next upcoming occurrence of a group, not every future one', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1: log 6/10. Total so far = 6/50. Current is now BBB 2.
+    await logSetWithReps(page, 6, 10);
+
+    // BBB 3 (the immediate next BBB set) still shows the deficit — that's
+    // the one useful "heads up" before you get there.
+    const nextUpcoming = page.locator('.set-item').nth(5);
+    await expect(nextUpcoming.locator('[data-testid="set-deficit"]')).toContainText('6/50');
+
+    // BBB 4 and BBB 5 are further-out occurrences of the same group. The
+    // number can't have changed since none of the sets in between have been
+    // done yet, so repeating it on every remaining card is just noise —
+    // it should only show once, on the next upcoming card.
+    const laterUpcoming1 = page.locator('.set-item').nth(6);
+    const laterUpcoming2 = page.locator('.set-item').nth(7);
+    await expect(laterUpcoming1.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+    await expect(laterUpcoming2.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+  });
+
   test('missing reps in the last BBB set adds a bonus set prescribed only the reps still owed', async ({ page }) => {
     await completeMainSets(page);
     // BBB 1-4 at full

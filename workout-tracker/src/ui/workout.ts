@@ -278,6 +278,9 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   function renderSets() {
     setsContainer.innerHTML = '';
+    // Tracks which volume groups have already shown their deficit on an
+    // upcoming (not-yet-reached) card in this render pass — see below.
+    const deficitShownAhead = new Set<string>();
     workoutSets.forEach((set, idx) => {
       const weight = getSetWeight(set, tmMap);
       const plates = weight > 0 ? calculatePlates(weight) : null;
@@ -299,17 +302,25 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (set.isAmrap) repsDisplay += '+';
       if (set.isBonus) repsDisplay += ' (bonus)';
 
-      // Shown on every set in a volume group (not just bonus sets) — once a
-      // set falls short, the running total lets you tell how much you still
-      // owe well before you reach the make-up bonus sets at the end.
+      // Shown on the current set (not just bonus sets) so a shortfall is
+      // visible before you reach the make-up bonus sets at the end, and on
+      // the *next* upcoming occurrence of the group so you get one heads-up
+      // ahead of time. Not repeated on every further-out future set: the
+      // number can't have changed since none of the sets in between have
+      // been done yet, so showing it on each one is just the same line
+      // pasted down the list.
       let deficitDisplay = '';
       const groupKey = getVolumeGroupKey(set);
       if (groupKey) {
-        const progress = computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups);
-        if (progress) {
-          const remaining = Math.max(0, progress.target - progress.cumulative);
-          deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
+        const isFirstUpcomingOccurrence = idx > currentSetIndex && !deficitShownAhead.has(groupKey);
+        if (idx === currentSetIndex || isFirstUpcomingOccurrence) {
+          const progress = computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups);
+          if (progress) {
+            const remaining = Math.max(0, progress.target - progress.cumulative);
+            deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
+          }
         }
+        if (idx > currentSetIndex) deficitShownAhead.add(groupKey);
       }
 
       const weightDisplay = weight > 0 ? `${weight} lbs` : 'BW / Custom';
