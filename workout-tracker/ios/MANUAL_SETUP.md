@@ -33,7 +33,17 @@ no `.pbxproj` editing and no Xcode GUI step. Concretely:
   `LiveActivityWidget.swift` here instead.
 - `Assets.xcassets/LiveActivityIcon.imageset` is the app icon used in the
   Live Activity's lock-screen banner and compact/minimal Dynamic Island —
-  same deal, just files in a folder.
+  same deal, just files in a folder. Keep this image small (it's currently
+  256×256, ~2.4x headroom over the 108px @3x it's actually displayed at):
+  Live Activities render in a memory-constrained system process, and a
+  full 1024×1024 App Store-sized icon decodes to ~4MB per reference —
+  comfortably enough to blow that budget across the three places this
+  asset is drawn (lock screen, compact leading, minimal). The failure mode
+  isn't a crash or a build warning, it's the icon silently rendering as a
+  blank box in every presentation while the rest of the layout (text, the
+  rest-state ring) renders fine — this happened once already when the
+  imageset was first added by copy-pasting the App target's
+  `AppIcon-512@2x.png` verbatim; see the fix in git history for this file.
 
 So the loop is: edit the `.swift`/asset files → commit → push → run the
 "iOS TestFlight" workflow from the Actions tab (or `gh workflow run
