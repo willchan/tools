@@ -236,6 +236,64 @@ test.describe('Intersperse Accessories', () => {
     await expect(deficit).toContainText('5 to go');
   });
 
+  test('interspersed: BBB deficit dedup survives an accessory set from a different group in between', async ({ page }) => {
+    // Sequence: P0 A0(leg-curl1) P1 A1(leg-curl2) P2 A2(leg-curl3) P3(BBB1) A3(hangleg1) P4(BBB2) ...
+    // BBB1 and BBB2 are the same volume group, but with intersperse on
+    // they're no longer adjacent in the set list — A3 (a different group)
+    // sits between them. The dedup has to compare against the group's own
+    // history, not the literal previous card, or it'll wrongly re-show the
+    // identical total on BBB2.
+    await page.locator('[data-testid="intersperse-checkbox"]').check();
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    const DONE = '[data-testid="done-set-btn"]';
+    const SKIP_TIMER = '#skip-timer-btn';
+    const MISSED_TOGGLE = '[data-testid="missed-reps-toggle"]';
+    const STEPPER_DEC = '[data-testid="stepper-dec"]';
+
+    async function skipRestIfShown() {
+      try {
+        await page.locator(SKIP_TIMER).waitFor({ state: 'visible', timeout: 500 });
+        await page.click(SKIP_TIMER);
+      } catch {
+        /* no timer to skip */
+      }
+    }
+
+    // P0, A0 (leg-curl 1 full), P1, A1 (leg-curl 2 full), P2, A2 (leg-curl 3 full)
+    await page.click(DONE);
+    await skipRestIfShown();
+    await page.click(DONE);
+    await page.click(DONE);
+    await skipRestIfShown();
+    await page.click(DONE);
+    await page.click(DONE);
+    await skipRestIfShown();
+    await page.click(DONE);
+
+    // P3 (BBB 1): log 6/10. Total so far = 6/50.
+    await page.click(MISSED_TOGGLE);
+    for (let i = 0; i < 4; i++) await page.click(STEPPER_DEC);
+    await page.click(DONE);
+    await skipRestIfShown();
+
+    // BBB 1's completed card shows the deficit.
+    const bbb1 = page.locator('.set-item.completed').filter({ hasText: 'squat' }).nth(3);
+    const bbb1Deficit = bbb1.locator('[data-testid="set-deficit"]');
+    await expect(bbb1Deficit).toContainText('6/50');
+
+    // A3 (hanging-leg-raise 1, full) — a different group, sits between BBB 1 and BBB 2.
+    await page.click(DONE);
+
+    // BBB 2 is now current. Nothing has changed in the squat group since
+    // BBB 1, so it shouldn't repeat the identical 6/50 — even though an
+    // unrelated hanging-leg-raise set is the literal previous card.
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('.set-exercise')).toContainText('squat');
+    await expect(current.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+  });
+
   test('interspersed: no new rest timer after completing accessory set', async ({ page }) => {
     await page.locator('[data-testid="intersperse-checkbox"]').check();
     await page.click('#start-workout-btn');

@@ -267,18 +267,72 @@ test.describe('Volume deficit — workout flow', () => {
     // BBB 1: log 6/10. Total so far = 6/50.
     await logSetWithReps(page, 6, 10);
 
-    // BBB 2 is now current and isn't a bonus set — the deficit should still
-    // show, so a shortfall is visible well before the group's originally
-    // scheduled sets run out and a bonus set gets appended.
-    const current = page.locator('.set-item.current');
-    await expect(current).not.toHaveAttribute('data-bonus', 'true');
-    const deficit = current.locator('[data-testid="set-deficit"]');
+    // BBB 1 (not a bonus set) shows the deficit on its own completed card —
+    // a shortfall is visible well before the group's originally scheduled
+    // sets run out and a bonus set gets appended. BBB 2 is now current but
+    // doesn't repeat the identical number right underneath.
+    const bbb1 = page.locator('.set-item.completed').filter({ hasText: 'squat' }).nth(3);
+    await expect(bbb1).not.toHaveAttribute('data-bonus', 'true');
+    const deficit = bbb1.locator('[data-testid="set-deficit"]');
     await expect(deficit).toContainText('6/50');
     await expect(deficit).toContainText('44 to go');
 
-    // The still-upcoming BBB 3 (not yet current) should show it too.
-    const upcoming = page.locator('.set-item').nth(5);
-    await expect(upcoming.locator('[data-testid="set-deficit"]')).toContainText('6/50');
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+  });
+
+  test('deficit does not repeat on upcoming sets belonging to the same group as the current set', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1: log 6/10. Total so far = 6/50. Current is now BBB 2, which
+    // already shows the deficit on its own card.
+    await logSetWithReps(page, 6, 10);
+
+    // BBB 3, 4, and 5 are all still-upcoming occurrences of the very same
+    // group current is already showing. The number can't have changed
+    // since none of the sets in between have been done yet, so repeating it
+    // on every remaining card of the same exercise is just the same line
+    // pasted down the list — none of them should show it.
+    const bbb3 = page.locator('.set-item').nth(5);
+    const bbb4 = page.locator('.set-item').nth(6);
+    const bbb5 = page.locator('.set-item').nth(7);
+    await expect(bbb3.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+    await expect(bbb4.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+    await expect(bbb5.locator('[data-testid="set-deficit"]')).toHaveCount(0);
+  });
+
+  test('completed sets in a volume group show the running deficit as of when each was done', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1: log 6/10. Total so far = 6/50.
+    await logSetWithReps(page, 6, 10);
+    // BBB 2: full 10. Total so far = 16/50.
+    await completeSet(page);
+
+    // BBB 1's completed card is a snapshot as of right after it was
+    // logged — it should keep showing 6/50, not the later 16/50.
+    const bbb1 = page.locator('.set-item.completed').filter({ hasText: 'squat' }).nth(3);
+    const bbb1Deficit = bbb1.locator('[data-testid="set-deficit"]');
+    await expect(bbb1Deficit).toContainText('6/50');
+    await expect(bbb1Deficit).toContainText('44 to go');
+
+    // BBB 2's completed card reflects the total as of after it was done.
+    const bbb2 = page.locator('.set-item.completed').filter({ hasText: 'squat' }).nth(4);
+    const bbb2Deficit = bbb2.locator('[data-testid="set-deficit"]');
+    await expect(bbb2Deficit).toContainText('16/50');
+    await expect(bbb2Deficit).toContainText('34 to go');
+  });
+
+  test('the completed set that closes a volume-group deficit shows 0 to go', async ({ page }) => {
+    await completeMainSets(page);
+    // BBB 1-4 at full (40), BBB 5 short (6/10) → total 46, bonus for 4 owed.
+    for (let i = 0; i < 4; i++) await completeSet(page);
+    await logSetWithReps(page, 6, 10);
+    // Complete the bonus set at its full prescribed (4) reps → total 50.
+    await completeSet(page);
+
+    const bonusCard = page.locator('.set-item.completed[data-bonus="true"]');
+    const deficit = bonusCard.locator('[data-testid="set-deficit"]');
+    await expect(deficit).toContainText('50/50');
+    await expect(deficit).toContainText('0 to go');
   });
 
   test('missing reps in the last BBB set adds a bonus set prescribed only the reps still owed', async ({ page }) => {
@@ -331,19 +385,25 @@ test.describe('Volume deficit — workout flow', () => {
     await expect(current.locator('.set-prescription')).toContainText('bonus');
   });
 
-  test('accessory bonus set shows the running deficit toward the volume target', async ({ page }) => {
+  test('leg-curl 3 shows the running deficit toward the volume target when it queues the bonus set', async ({ page }) => {
     await completeMainSets(page);
     // 5 BBB at full
     for (let i = 0; i < 5; i++) await completeSet(page);
     // Leg-curl set 1 & 2 at full (10/10)
     await completeSet(page);
     await completeSet(page);
-    // Leg-curl set 3: log 5/10. Total = 25 < 30. Bonus set appears.
+    // Leg-curl set 3: log 5/10. Total = 25 < 30. Bonus set appears as current,
+    // but doesn't repeat the identical 25/30 leg-curl 3 already shows.
     await logSetWithReps(page, 5, 10);
 
-    const deficit = page.locator('.set-item.current [data-testid="set-deficit"]');
+    const legCurl3 = page.locator('.set-item.completed').filter({ hasText: 'leg-curl' }).nth(2);
+    const deficit = legCurl3.locator('[data-testid="set-deficit"]');
     await expect(deficit).toContainText('25/30');
     await expect(deficit).toContainText('5 to go');
+
+    const current = page.locator('.set-item.current');
+    await expect(current.locator('.set-exercise')).toContainText('leg-curl');
+    await expect(current.locator('[data-testid="set-deficit"]')).toHaveCount(0);
   });
 
   test('missing reps on a main 5/3/1 set does not append a bonus set', async ({ page }) => {
