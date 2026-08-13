@@ -15,6 +15,7 @@ import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionS
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
 import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex, computeOwedReps } from '../logic/volume';
+import type { VolumeProgress } from '../logic/volume';
 import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
 import { resolveExerciseName } from '../logic/exerciseName';
 import { navigate } from './router';
@@ -278,9 +279,32 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   function renderSets() {
     setsContainer.innerHTML = '';
-    // Tracks which volume groups have already shown their deficit on an
-    // upcoming (not-yet-reached) card in this render pass — see below.
+    const actualRepsSoFar = completedSets.map((s) => s.actualReps);
+
+    // Volume-group deficit display, tracked per group (not by raw array
+    // position) so accessory interspersing — which can put an unrelated
+    // group's set between two occurrences of the same group — can't break
+    // the dedup below:
+    //
+    // 1. Completed sets show a growing trail: the running total right
+    //    after each was logged, but only when it differs from that group's
+    //    most recently *shown* total — so if nothing changed (e.g. a 0-rep
+    //    set), it still doesn't repeat identical numbers back to back.
+    // 2. The current set shows its own "before this attempt" total, unless
+    //    it's identical to the trail's last entry for its own group — that
+    //    number is already visible on the completed card above it.
+    // 3. The next upcoming occurrence of a *different* group than the
+    //    current set's own gets one heads-up (e.g. a bonus set queued
+    //    behind an unrelated primary lift); further-out future sets don't
+    //    repeat it, since nothing can change until the current set itself
+    //    is logged.
+    const lastShownForGroup = new Map<string, VolumeProgress>();
     const deficitShownAhead = new Set<string>();
+    const currentSet = workoutSets[currentSetIndex];
+    const currentGroupKey = currentSet ? getVolumeGroupKey(currentSet) : null;
+    if (currentGroupKey) deficitShownAhead.add(currentGroupKey);
+    const isSameValue = (a: VolumeProgress, b: VolumeProgress) => a.cumulative === b.cumulative && a.target === b.target;
+
     workoutSets.forEach((set, idx) => {
       const weight = getSetWeight(set, tmMap);
       const plates = weight > 0 ? calculatePlates(weight) : null;
@@ -302,25 +326,34 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (set.isAmrap) repsDisplay += '+';
       if (set.isBonus) repsDisplay += ' (bonus)';
 
-      // Shown on the current set (not just bonus sets) so a shortfall is
-      // visible before you reach the make-up bonus sets at the end, and on
-      // the *next* upcoming occurrence of the group so you get one heads-up
-      // ahead of time. Not repeated on every further-out future set: the
-      // number can't have changed since none of the sets in between have
-      // been done yet, so showing it on each one is just the same line
-      // pasted down the list.
       let deficitDisplay = '';
       const groupKey = getVolumeGroupKey(set);
       if (groupKey) {
-        const isFirstUpcomingOccurrence = idx > currentSetIndex && !deficitShownAhead.has(groupKey);
-        if (idx === currentSetIndex || isFirstUpcomingOccurrence) {
-          const progress = computeVolumeProgress(groupKey, workoutSets, completedSets.map((s) => s.actualReps), idx, volumeGroups);
+        if (isCompleted) {
+          const progress = computeVolumeProgress(groupKey, workoutSets, actualRepsSoFar, idx + 1, volumeGroups);
           if (progress) {
-            const remaining = Math.max(0, progress.target - progress.cumulative);
-            deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
+            const prevShown = lastShownForGroup.get(groupKey);
+            if (!prevShown || !isSameValue(prevShown, progress)) {
+              const remaining = Math.max(0, progress.target - progress.cumulative);
+              deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
+              lastShownForGroup.set(groupKey, progress);
+            }
           }
+        } else {
+          const isFirstUpcomingOccurrence = idx > currentSetIndex && !deficitShownAhead.has(groupKey);
+          if (idx === currentSetIndex || isFirstUpcomingOccurrence) {
+            const progress = computeVolumeProgress(groupKey, workoutSets, actualRepsSoFar, idx, volumeGroups);
+            if (progress) {
+              const prevShown = lastShownForGroup.get(groupKey);
+              const duplicatesTrail = idx === currentSetIndex && !!prevShown && isSameValue(prevShown, progress);
+              if (!duplicatesTrail) {
+                const remaining = Math.max(0, progress.target - progress.cumulative);
+                deficitDisplay = `<span class="set-deficit" data-testid="set-deficit">${progress.cumulative}/${progress.target} reps so far · ${remaining} to go</span>`;
+              }
+            }
+          }
+          if (idx > currentSetIndex) deficitShownAhead.add(groupKey);
         }
-        if (idx > currentSetIndex) deficitShownAhead.add(groupKey);
       }
 
       const weightDisplay = weight > 0 ? `${weight} lbs` : 'BW / Custom';
@@ -358,6 +391,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
             </div>
             <div class="set-result">
               <span class="set-reps-done ${missedReps ? 'missed' : ''}">${completed.actualReps} reps ✓</span>
+              ${deficitDisplay}
               <button class="btn btn-small edit-set-btn" data-testid="edit-set-btn" data-set-idx="${idx}">Edit</button>
             </div>
           `;

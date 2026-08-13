@@ -135,6 +135,13 @@ test.describe('Editing a completed set reconciles volume/bonus sets', () => {
     const updatedBonus = page.locator('.set-item.current');
     await expect(updatedBonus).toHaveAttribute('data-bonus', 'true');
     await expect(updatedBonus.locator('.set-prescription')).toContainText('9 reps');
-    await expect(updatedBonus.locator('[data-testid="set-deficit"]')).toContainText('41/50');
+
+    // The recomputed 41/50 total shows on BBB 5's completed card (the set
+    // immediately before the bonus) rather than repeating on the bonus
+    // card itself, which would just be the identical number again. (3
+    // main sets + BBB 1-5 → BBB 5 is the 8th completed "squat" item.)
+    const bbb5 = page.locator('.set-item.completed').filter({ hasText: 'squat' }).nth(7);
+    await expect(bbb5.locator('[data-testid="set-deficit"]')).toContainText('41/50');
+    await expect(updatedBonus.locator('[data-testid="set-deficit"]')).toHaveCount(0);
   });
 });
