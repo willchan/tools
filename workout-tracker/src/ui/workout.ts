@@ -11,7 +11,7 @@ import {
   completeWorkoutAtomic,
   putTrainingMaxesAtomic,
 } from '../db/database';
-import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionState } from '../db/types';
+import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionState, TimerState } from '../db/types';
 import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
 import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex, computeOwedReps } from '../logic/volume';
@@ -195,10 +195,14 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   // detectors only ever race against each other, never against a different
   // render's.
   let timerExpiryHandled = false;
-  // Rest-timer end time as last reported to the Live Activity (native-only;
+  // Rest-timer start/end as last reported to the Live Activity (native-only;
   // no-op on web). Tracked separately from the DOM/IndexedDB timer state so
   // the activity payload can be rebuilt on demand without re-reading either.
+  // Both travel together — restStartTime only ever has meaning paired with
+  // a restEndTime — so they're only ever written together, by
+  // syncLiveActivity()/restStartTimeOf() below.
   let liveActivityRestEndTime: number | null = null;
+  let liveActivityRestStartTime: number | null = null;
 
   // Restore in-progress workout if one exists for this same day (either it
   // already matched, or the conflict above was just resolved by resuming it).
@@ -717,11 +721,21 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       setIndex: Math.min(currentSetIndex + 1, workoutSets.length),
       setTotal: workoutSets.length,
       restEndTime: liveActivityRestEndTime,
+      restStartTime: liveActivityRestStartTime,
     };
   }
 
-  function syncLiveActivity(restEndTime: number | null) {
-    liveActivityRestEndTime = restEndTime;
+  // TimerState only stores expectedEndTime + durationMs (see logic/timer.ts)
+  // — derived here, in the one place both syncLiveActivity() and the
+  // mount-time timer-recovery branch below need it, rather than
+  // recomputing `expectedEndTime - durationMs` at each call site.
+  function restStartTimeOf(timer: TimerState): number {
+    return timer.expectedEndTime - timer.durationMs;
+  }
+
+  function syncLiveActivity(timer: TimerState | null) {
+    liveActivityRestEndTime = timer?.expectedEndTime ?? null;
+    liveActivityRestStartTime = timer ? restStartTimeOf(timer) : null;
     void updateWorkoutActivity(liveActivityState());
   }
 
@@ -831,7 +845,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const timer = createTimerState(restSeconds);
     await putTimerState(timer);
     scheduleBackgroundTimerNotification(timer.expectedEndTime);
-    syncLiveActivity(timer.expectedEndTime);
+    syncLiveActivity(timer);
 
     timerEl.classList.remove('hidden');
     setDoneButtonDisabled(true);
@@ -1116,6 +1130,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const remaining = getRemainingMs(existingTimer);
     if (remaining > 0) {
       liveActivityRestEndTime = existingTimer.expectedEndTime;
+      liveActivityRestStartTime = restStartTimeOf(existingTimer);
       timerEl.classList.remove('hidden');
       setDoneButtonDisabled(true);
       // timerInterval is shared module state — if a previous render left

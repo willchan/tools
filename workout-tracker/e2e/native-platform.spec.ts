@@ -375,6 +375,58 @@ test.describe('Native Live Activity wiring', () => {
   });
 });
 
+test.describe('Live Activity content state', () => {
+  // toContentState() only ever produces the Record<string, string> that
+  // crosses the JS-to-native bridge (ActivityKit content states can't carry
+  // numbers), so it's tested directly rather than through the plugin-wiring
+  // suite above — the console-warning signal that suite polls for can't
+  // observe payload contents, only that a method was called at all.
+  test('includes restStartTime alongside restEndTime, both stringified', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    const contentState = await page.evaluate(async () => {
+      const { toContentState } = await import('/src/native/liveActivity.ts');
+      return toContentState({
+        dayName: 'Day 1',
+        exerciseName: 'Bench Press',
+        setIndex: 2,
+        setTotal: 5,
+        restEndTime: 1700000090000,
+        restStartTime: 1700000000000,
+      });
+    });
+
+    expect(contentState.restEndTime).toBe('1700000090000');
+    expect(contentState.restStartTime).toBe('1700000000000');
+  });
+
+  // Regression coverage for the ProgressView(timerInterval:) range this
+  // feeds on the Swift side: a range anchored on a missing start would trap
+  // ("Range requires lowerBound <= upperBound") on the widget, so the JS
+  // side must always emit an explicit empty string (never omit the key)
+  // when not resting, mirroring restEndTime's existing not-resting shape.
+  test('sends restStartTime as an empty string when not resting', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    const contentState = await page.evaluate(async () => {
+      const { toContentState } = await import('/src/native/liveActivity.ts');
+      return toContentState({
+        dayName: 'Day 1',
+        exerciseName: 'Bench Press',
+        setIndex: 2,
+        setTotal: 5,
+        restEndTime: null,
+        restStartTime: null,
+      });
+    });
+
+    expect(contentState.restEndTime).toBe('');
+    expect(contentState.restStartTime).toBe('');
+  });
+});
+
 test.describe('Native data export', () => {
   test('export writes a file via Filesystem and opens the native share sheet', async ({ page }) => {
     await page.addInitScript(() => {
