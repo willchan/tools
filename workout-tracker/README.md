@@ -16,11 +16,15 @@ workout-tracker/
 │   ├── logic/
 │   │   ├── calculator.ts     # Weight calculation, plate calculator, TM math
 │   │   ├── progression.ts    # State machine for day/week/cycle advancement
-│   │   └── timer.ts          # Resilient rest timer (survives tab suspension)
+│   │   ├── timer.ts          # Resilient rest timer (survives tab suspension)
+│   │   ├── workoutSession.ts # Pure reducer for every in-workout action (phone and watch)
+│   │   └── watchProtocol.ts  # Apple Watch tap validation and display-ready snapshots
 │   ├── native/                # iOS-native code paths (no-op on web)
 │   │   ├── platform.ts        # Capacitor.isNativePlatform() wrapper
 │   │   ├── liveActivity.ts    # Lock screen / Dynamic Island Live Activity
-│   │   └── otaUpdate.ts       # Self-hosted OTA web-bundle updates
+│   │   ├── otaUpdate.ts       # Self-hosted OTA web-bundle updates
+│   │   ├── watchBridge.ts     # Our WatchBridge Capacitor plugin (+ watchBridgeWeb.ts test double)
+│   │   └── watch.ts           # Apple Watch remote wiring (see docs/adr/0002)
 │   └── ui/
 │       ├── router.ts         # Hash-based SPA router
 │       ├── home.ts           # Home screen with "Start Next Workout" flow
@@ -83,6 +87,7 @@ An optional native iOS shell lives alongside the PWA — same `src/`, wrapped by
 - `src/native/platform.ts` — `Capacitor.isNativePlatform()` wrapper used to branch native/web code paths.
 - `src/native/liveActivity.ts` — start/update/end a Live Activity via the `capacitor-live-activity` plugin; no-op on web.
 - `src/native/otaUpdate.ts` — self-hosted over-the-air web-bundle updates via `@capgo/capacitor-updater`, since Capacitor bakes `dist/` into the binary at build time.
+- `src/native/watch.ts` + `src/native/watchBridge.ts` — Apple Watch remote ([ADR 0002](docs/adr/0002-apple-watch-remote.md)). Watch taps go through the same reducer (`src/logic/workoutSession.ts`) as phone taps. They're committed together with an idempotency id, rejected if their `setId` is stale, and acked to the native queue only after the commit. The phone pushes numbered snapshots back. `WatchBridge` is our own plugin: its web implementation (`watchBridgeWeb.ts`) plays the native side in tests, and the native side (WatchConnectivity + disk queue) is the next step. Until it ships, all of this is inactive on iOS.
 - `src/ui/notifications.ts` — on native, rest-timer notifications are scheduled with `@capacitor/local-notifications` using an absolute fire time (`schedule.at`), instead of the web path's service-worker `setTimeout`, which iOS can suspend before it elapses. Haptics use `@capacitor/haptics` in place of the web's `navigator.vibrate` (unimplemented in WebKit).
 - `src/ui/settings.ts` — the "Export Data" button writes the JSON via `@capacitor/filesystem` and opens the native share sheet (`@capacitor/share`) on native, since a browser `<a download>` blob produces no usable file inside a WKWebView shell. Import is unchanged — the `<input type="file">` picker works as-is.
 

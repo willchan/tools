@@ -1,6 +1,6 @@
 # 0002. Apple Watch companion as a thin remote
 
-- **Status:** Accepted, 2026-09. Implementation in progress (see Build order).
+- **Status:** Accepted, 2026-09. Step 1 (TS) is implemented. Steps 2–4 are pending.
 - **Related:** [0001](0001-web-first-with-capacitor-shell.md)
 
 ## Context

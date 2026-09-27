@@ -68,6 +68,10 @@ Five layers exist, each covering something the others can't:
    (`src/native/*`, `notifications.ts`, `workout.ts`, `settings.ts`) calls
    the right plugin methods with the right arguments. Runs in a plain
    browser, so it can't touch actual ActivityKit/UNUserNotificationCenter.
+   Our own `WatchBridge` plugin ships a web implementation for the same
+   purpose (`src/native/watchBridgeWeb.ts`, driven by
+   `e2e/watch-bridge.spec.ts`): it records snapshots and acks and can emit
+   watch taps.
 2. **`AppLogic`'s XCTest suite (CI only, no Mac needed).** `App` and
    `LiveActivityWidget` are Xcode targets with no unit test target of their
    own — adding one means editing `App.xcodeproj`'s target graph, which has

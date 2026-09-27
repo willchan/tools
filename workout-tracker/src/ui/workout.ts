@@ -27,6 +27,7 @@ import {
   getSetWeight,
 } from '../logic/workoutSession';
 import type { SessionEvent, SessionResult, SessionState } from '../logic/workoutSession';
+import { checkWatchEvent, recordAppliedEventId, setIdFor } from '../logic/watchProtocol';
 import { getRemainingMs, formatTime } from '../logic/timer';
 import { resolveExerciseName } from '../logic/exerciseName';
 import { navigate } from './router';
@@ -34,6 +35,8 @@ import { requestWakeLock, releaseWakeLock } from './wakelock';
 import { requestNotificationPermission, fireTimerNotification, scheduleBackgroundTimerNotification, cancelBackgroundTimerNotification, primeAudioContext } from './notifications';
 import { log as logEvent } from '../logic/logger';
 import { startWorkoutActivity, updateWorkoutActivity, endWorkoutActivity } from '../native/liveActivity';
+import { attachWorkoutHost, detachWorkoutHost, pushWatchSnapshot, startWatchWorkout } from '../native/watch';
+import type { WatchSessionHost } from '../native/watch';
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let isResting = false;
@@ -594,10 +597,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   /**
    * Apply one event: compute the next state with the shared reducer, commit
    * it (workout + rest timer in one transaction), and only then adopt it and
-   * update the screen. Must run inside dispatch().
+   * update the screen. A watch tap's id is committed in the same record as
+   * its effect, so a redelivered tap is recognized. Must run inside
+   * dispatch().
    */
-  async function applyEvent(event: SessionEvent): Promise<SessionResult> {
+  async function applyEvent(event: SessionEvent, watchEventId?: string): Promise<SessionResult> {
     const result = applySessionEvent(session, event, ctx);
+    if (watchEventId) result.state = recordAppliedEventId(result.state, watchEventId);
     // Don't rewrite an unchanged running timer, so a rest the expiry
     // handler just cleared can't be written back. Clearing is always safe.
     const nextTimer = result.state.timer;
@@ -605,6 +611,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     await commitActiveWorkoutAtomic(toActiveWorkout(result.state), timerUpdate);
     session = result.state;
     await runEffects(event, result);
+    void pushWatchSnapshot();
     return result;
   }
 
@@ -665,7 +672,45 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (isNaN(actualReps)) actualReps = effectiveReps;
     }
 
-    await dispatch(() => applyEvent({ type: 'completeSet', at: Date.now(), reps: actualReps }));
+    // The tap is for the set on screen. If that set was completed in the
+    // meantime (from the watch), drop it rather than complete the next one.
+    const tappedSetId = setIdFor(session);
+    const at = Date.now();
+    await dispatch(async () => {
+      if (setIdFor(session) !== tappedSetId) return;
+      await applyEvent({ type: 'completeSet', at, reps: actualReps });
+    });
+  }
+
+  // Apple Watch remote: watch taps come in through here (see
+  // src/native/watch.ts) and take the same path as a tap on this screen.
+  let workoutEnded = false;
+  const watchHost: WatchSessionHost = {
+    isAlive: () => !workoutEnded && container.contains(setsContainer),
+    snapshotSource: () => ({ session, ctx, dayName: day.name, exercises }),
+    handleEvent: (event) =>
+      dispatch(async () => {
+        const verdict = checkWatchEvent(session, event, Date.now());
+        switch (verdict.kind) {
+          case 'apply':
+            await applyEvent(verdict.event, event.id);
+            return 'applied';
+          case 'finish':
+            await completeWorkout(verdict.at);
+            return 'applied';
+          case 'duplicate':
+            return 'duplicate';
+          case 'stale':
+          case 'invalid':
+            await logEvent('warn', `watch event ${verdict.kind}`, `id=${event.id}: ${verdict.reason}`);
+            return verdict.kind;
+        }
+      }),
+  };
+
+  function endWatchSession() {
+    workoutEnded = true;
+    detachWorkoutHost(watchHost);
   }
 
   function liveActivityState() {
@@ -921,6 +966,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     // conflict, whose "next" position may be behind wherever progression
     // has since actually moved (see its doc comment).
     await completeWorkoutAtomic({ log, candidateState: result.newState, tmBumps });
+    endWatchSession();
 
     // Cleanup
     releaseWakeLock();
@@ -943,6 +989,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   // Event listeners
   document.getElementById('back-btn')?.addEventListener('click', async () => {
+    endWatchSession();
     releaseWakeLock();
     if (timerInterval) clearInterval(timerInterval);
     cancelBackgroundTimerNotification();
@@ -972,6 +1019,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     document.getElementById('app')?.appendChild(dialog);
 
     document.getElementById('abandon-confirm-yes')?.addEventListener('click', async () => {
+      endWatchSession();
       await putActiveWorkout(null);
       await putTimerState(null);
       releaseWakeLock();
@@ -1060,4 +1108,6 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   renderSets();
   void startWorkoutActivity(liveActivityState());
+  attachWorkoutHost(watchHost);
+  void startWatchWorkout();
 }

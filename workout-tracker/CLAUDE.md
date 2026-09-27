@@ -59,8 +59,10 @@ coverage layers") for how the pieces are built and tested.
 Build order, from ADR 0002:
 
 1. TS: pure `src/logic/workoutSession.ts` reducer used by both the phone UI and
-   watch events; `src/native/watch.ts` wiring; `WatchBridge` plugin web
-   implementation.
+   watch events; `src/logic/watchProtocol.ts` (idempotency, `setId`
+   guard, snapshots); `src/native/watch.ts` wiring; `WatchBridge` plugin web
+   implementation. **Done.** The TS contract for step 2 is
+   `src/native/watchBridge.ts` (`WatchBridgePlugin`).
 2. Native `WatchBridge` plugin (`WCSession` + disk queue); Codable protocol
    types and queue logic in `AppLogic` (iOS + watchOS), XCTest on both.
 3. Watch target via a checked-in `xcodeproj` script: HealthKit workout session
