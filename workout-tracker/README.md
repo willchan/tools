@@ -55,6 +55,13 @@ workout-tracker/
 
 ## Key Design Decisions
 
+Larger architectural decisions are recorded as ADRs in [`docs/adr/`](docs/adr/):
+
+- [0001 — Web-first with a Capacitor shell](docs/adr/0001-web-first-with-capacitor-shell.md)
+- [0002 — Apple Watch as a thin remote](docs/adr/0002-apple-watch-remote.md)
+
+App-specific contributor rules (native shell, `AppLogic`, the watch target) are in [`CLAUDE.md`](CLAUDE.md).
+
 ### Offline-First
 All data is stored in IndexedDB using the `idb` wrapper. The app functions fully offline. A service worker caches the app shell with a network-first strategy.
 
@@ -93,7 +100,7 @@ cd workout-tracker && bun run cap:sync       # build + `cap sync ios`
 
 `e2e/native-platform.spec.ts` covers the native branches added above — it forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform` (Capacitor's own supported override) and asserts each plugin call, using the real "web" fallback implementations already in each installed package rather than hand-rolled mocks. This runs as part of the normal Playwright suite (no Mac needed) and catches wiring regressions (wrong arguments, a call site removed, a missing await), but can't verify real ActivityKit/UNUserNotificationCenter behavior.
 
-The Swift side (`ios/App/App`, `ios/App/LiveActivityWidget`) has no unit test target of its own — Apple's CLI has no way to add one to an `.xcodeproj` without Xcode's GUI. Instead, real Swift logic lives in `ios/App/AppLogic`, a standalone local Swift package with its own XCTest suite, tested via `xcodebuild test -scheme AppLogic` directly against a bare `Package.swift` (no Xcode project needed) — see `ios/MANUAL_SETUP.md` for what each of the four test layers (Playwright wiring tests, `AppLogic`'s XCTest suite, the CI Simulator smoke test, manual on-device verification) does and doesn't cover, and how to add a package dependency to the `App` target.
+The Swift side (`ios/App/App`, `ios/App/LiveActivityWidget`) has no unit test target of its own. (Adding targets doesn't need Xcode's GUI: `AppUITests` was added headlessly with the `xcodeproj` gem, see `ios/MANUAL_SETUP.md`.) Instead, real Swift logic lives in `ios/App/AppLogic`, a standalone local Swift package with its own XCTest suite, tested via `xcodebuild test -scheme AppLogic` directly against a bare `Package.swift` (no Xcode project needed) — see `ios/MANUAL_SETUP.md` for what each of the four test layers (Playwright wiring tests, `AppLogic`'s XCTest suite, the CI Simulator smoke test, manual on-device verification) does and doesn't cover, and how to add a package dependency to the `App` target.
 
 ## PWA Mechanics
 
