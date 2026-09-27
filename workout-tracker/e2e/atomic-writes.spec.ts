@@ -255,4 +255,46 @@ test.describe('Atomic multi-store writes', () => {
     expect(result.bench).toBe(555);
     expect(result.squat).toBe(666);
   });
+
+  test('commitActiveWorkoutAtomic writes the workout and timer together, and can leave or clear the timer', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+
+    const result = await page.evaluate(async () => {
+      const { commitActiveWorkoutAtomic, getActiveWorkout, getTimerState, putTimerState } = await import(
+        '/src/db/database.ts'
+      );
+      const workout = {
+        templateId: '531-bbb',
+        cycle: 1,
+        weekIndex: 0,
+        dayIndex: 0,
+        completedSets: [],
+        currentSetIndex: 1,
+        startedAt: 1,
+        appliedEventIds: ['tap-1'],
+      };
+      const timer = { expectedEndTime: Date.now() + 60_000, durationMs: 60_000 };
+
+      await commitActiveWorkoutAtomic(workout, timer);
+      const written = { workout: await getActiveWorkout(), timer: await getTimerState() };
+
+      await putTimerState({ expectedEndTime: 42, durationMs: 1 });
+      await commitActiveWorkoutAtomic({ ...workout, currentSetIndex: 2 }, undefined);
+      const untouched = await getTimerState();
+
+      await commitActiveWorkoutAtomic({ ...workout, currentSetIndex: 3 }, null);
+      const cleared = { workout: await getActiveWorkout(), timer: await getTimerState() };
+
+      return { written, timer, untouched, cleared };
+    });
+
+    expect(result.written.workout?.appliedEventIds).toEqual(['tap-1']);
+    expect(result.written.timer).toEqual(result.timer);
+    expect(result.untouched).toEqual({ expectedEndTime: 42, durationMs: 1 });
+    expect(result.cleared.workout?.currentSetIndex).toBe(3);
+    expect(result.cleared.timer).toBeNull();
+  });
 });

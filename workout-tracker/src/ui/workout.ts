@@ -8,15 +8,26 @@ import {
   getSettings,
   getActiveWorkout,
   putActiveWorkout,
+  commitActiveWorkoutAtomic,
   completeWorkoutAtomic,
   putTrainingMaxesAtomic,
 } from '../db/database';
-import type { CompletedSet, WorkoutLog, TemplateSet, ActiveWorkout, ProgressionState } from '../db/types';
-import { calculateWorkingWeight, calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
+import type { ActiveWorkout, ProgressionState, TimerState } from '../db/types';
+import { calculatePlates, formatPlates, calculateResetTM } from '../logic/calculator';
 import { advanceState } from '../logic/progression';
-import { computeVolumeGroups, evaluateBonusSetNeed, getVolumeGroupKey, computeBonusInsertionIndex, computeVolumeProgress, findRemovableBonusSetIndex, computeOwedReps } from '../logic/volume';
+import { getVolumeGroupKey, computeVolumeProgress } from '../logic/volume';
 import type { VolumeProgress } from '../logic/volume';
-import { createTimerState, getRemainingMs, formatTime } from '../logic/timer';
+import {
+  applySessionEvent,
+  buildWorkoutLog,
+  createSession,
+  createSessionContext,
+  detectFailures,
+  getEffectiveReps,
+  getSetWeight,
+} from '../logic/workoutSession';
+import type { SessionEvent, SessionResult, SessionState } from '../logic/workoutSession';
+import { getRemainingMs, formatTime } from '../logic/timer';
 import { resolveExerciseName } from '../logic/exerciseName';
 import { navigate } from './router';
 import { requestWakeLock, releaseWakeLock } from './wakelock';
@@ -155,23 +166,20 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     }
   }
 
-  // Volume rep-total targets are derived from the template (not from
-  // the runtime sequence) so they stay fixed even as bonus sets are added.
-  const volumeGroups = computeVolumeGroups(day.sets);
-
-  // Optionally intersperse accessories between primary sets
-  let workoutSets: TemplateSet[] = settings.intersperseAccessories
-    ? intersperseSets(day.sets)
-    : [...day.sets];
+  // All in-workout rules live in the pure reducer (src/logic/workoutSession.ts),
+  // shared with Apple Watch events. `session` is this render's copy of its
+  // state; it's only replaced after the new state is committed to IndexedDB.
+  const ctx = createSessionContext(day.sets, tmMap, settings);
+  let session: SessionState = createSession(day.sets, {
+    intersperseAccessories: settings.intersperseAccessories,
+    startedAt: Date.now(),
+  });
 
   // Request wake lock and notification permission
   requestWakeLock();
   requestNotificationPermission();
 
-  const completedSets: CompletedSet[] = [];
-  let currentSetIndex = 0;
   let editingSetIndex: number | null = null;
-  let workoutStartTime = Date.now();
   let timerExpiredTimeout: ReturnType<typeof setTimeout> | null = null;
   let timerExpiredClickDismiss: (() => void) | null = null;
   // Three independent places within *this* render can notice a rest timer
@@ -204,15 +212,20 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   // already matched, or the conflict above was just resolved by resuming it).
   let resumingActiveWorkout = false;
   if (activeWorkout && activeWorkoutMatches(activeWorkout, state)) {
-    completedSets.push(...activeWorkout.completedSets);
-    currentSetIndex = activeWorkout.currentSetIndex;
-    workoutStartTime = activeWorkout.startedAt;
-    // Restore the effective sequence (including any bonus sets that were
-    // appended for volume deficits) so the indexing into completedSets
-    // stays consistent across reloads.
-    if (activeWorkout.workoutSets && activeWorkout.workoutSets.length > 0) {
-      workoutSets = activeWorkout.workoutSets;
-    }
+    session = {
+      ...session,
+      completedSets: [...activeWorkout.completedSets],
+      currentSetIndex: activeWorkout.currentSetIndex,
+      startedAt: activeWorkout.startedAt,
+      // Restore the effective sequence (including any bonus sets that were
+      // appended for volume deficits) so the indexing into completedSets
+      // stays consistent across reloads.
+      workoutSets:
+        activeWorkout.workoutSets && activeWorkout.workoutSets.length > 0
+          ? activeWorkout.workoutSets
+          : session.workoutSets,
+      appliedEventIds: activeWorkout.appliedEventIds ?? [],
+    };
     resumingActiveWorkout = true;
   }
 
@@ -278,6 +291,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   container.appendChild(main);
 
   function renderSets() {
+    const { workoutSets, completedSets, currentSetIndex } = session;
     setsContainer.innerHTML = '';
     const actualRepsSoFar = completedSets.map((s) => s.actualReps);
 
@@ -306,7 +320,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const isSameValue = (a: VolumeProgress, b: VolumeProgress) => a.cumulative === b.cumulative && a.target === b.target;
 
     workoutSets.forEach((set, idx) => {
-      const weight = getSetWeight(set, tmMap);
+      const weight = getSetWeight(set, ctx.tmMap);
       const plates = weight > 0 ? calculatePlates(weight) : null;
       const isCompleted = idx < currentSetIndex;
       const isCurrent = idx === currentSetIndex;
@@ -320,7 +334,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       // A bonus set may owe fewer reps than a normal set of this exercise
       // (e.g. only 3 more needed to close the deficit) — prescribe exactly
       // that, not the full per-set count.
-      const effectiveReps = set.owedReps ?? set.reps;
+      const effectiveReps = getEffectiveReps(set);
 
       let repsDisplay = `${effectiveReps} reps`;
       if (set.isAmrap) repsDisplay += '+';
@@ -330,7 +344,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       const groupKey = getVolumeGroupKey(set);
       if (groupKey) {
         if (isCompleted) {
-          const progress = computeVolumeProgress(groupKey, workoutSets, actualRepsSoFar, idx + 1, volumeGroups);
+          const progress = computeVolumeProgress(groupKey, workoutSets, actualRepsSoFar, idx + 1, ctx.volumeGroups);
           if (progress) {
             const prevShown = lastShownForGroup.get(groupKey);
             if (!prevShown || !isSameValue(prevShown, progress)) {
@@ -342,7 +356,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         } else {
           const isFirstUpcomingOccurrence = idx > currentSetIndex && !deficitShownAhead.has(groupKey);
           if (idx === currentSetIndex || isFirstUpcomingOccurrence) {
-            const progress = computeVolumeProgress(groupKey, workoutSets, actualRepsSoFar, idx, volumeGroups);
+            const progress = computeVolumeProgress(groupKey, workoutSets, actualRepsSoFar, idx, ctx.volumeGroups);
             if (progress) {
               const prevShown = lastShownForGroup.get(groupKey);
               const duplicatesTrail = idx === currentSetIndex && !!prevShown && isSameValue(prevShown, progress);
@@ -545,99 +559,104 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     const valueEl = setsContainer.querySelector('[data-testid="edit-stepper-value"]') as HTMLElement | null;
     const newReps = parseInt(valueEl?.textContent || '', 10);
     if (!isNaN(newReps)) {
-      const editedSet = workoutSets[editingSetIndex];
-      completedSets[editingSetIndex] = { ...completedSets[editingSetIndex], actualReps: newReps };
-
-      const groupKey = getVolumeGroupKey(editedSet);
-      if (groupKey) {
-        reconcileVolumeGroup(groupKey);
-      }
-
-      await putActiveWorkout({
-        templateId: state!.templateId,
-        cycle: state!.cycle,
-        weekIndex: state!.weekIndex,
-        dayIndex: state!.dayIndex,
-        completedSets: [...completedSets],
-        currentSetIndex,
-        startedAt: workoutStartTime,
-        workoutSets: [...workoutSets],
-      });
+      const index = editingSetIndex;
+      await dispatch(() => applyEvent({ type: 'editSet', index, reps: newReps }));
     }
     editingSetIndex = null;
     renderSets();
   }
 
-  function getSetWeight(set: TemplateSet, tmMap: Map<string, number>): number {
-    if (set.tmPercentage === null || set.tmLiftId === null) return 0;
-    const tm = tmMap.get(set.tmLiftId);
-    if (!tm) return 0;
-    return calculateWorkingWeight(tm, set.tmPercentage);
+  function toActiveWorkout(s: SessionState): ActiveWorkout {
+    const record: ActiveWorkout = {
+      templateId: state!.templateId,
+      cycle: state!.cycle,
+      weekIndex: state!.weekIndex,
+      dayIndex: state!.dayIndex,
+      completedSets: [...s.completedSets],
+      currentSetIndex: s.currentSetIndex,
+      startedAt: s.startedAt,
+      workoutSets: [...s.workoutSets],
+    };
+    if (s.appliedEventIds.length > 0) record.appliedEventIds = [...s.appliedEventIds];
+    return record;
+  }
+
+  // Every in-workout action (a tap here, or an Apple Watch event) runs one
+  // at a time against the latest state, so two sources can't both act on
+  // the same set.
+  let dispatchChain: Promise<unknown> = Promise.resolve();
+  function dispatch<T>(action: () => Promise<T>): Promise<T> {
+    const run = dispatchChain.then(action, action);
+    dispatchChain = run.catch(() => {});
+    return run;
   }
 
   /**
-   * Single chokepoint for keeping a volume group's bonus sets in sync with
-   * completedSets. Called both when a set is originally marked done and
-   * whenever a past set's reps are edited, so a correction can retroactively
-   * drop a now-unneeded pending bonus set or add one that a downward edit
-   * newly requires — instead of the decision only ever being made once.
+   * Apply one event: compute the next state with the shared reducer, commit
+   * it (workout + rest timer in one transaction), and only then adopt it and
+   * update the screen. Must run inside dispatch().
    */
-  function reconcileVolumeGroup(groupKey: string) {
-    const actualReps = completedSets.map((s) => s.actualReps);
+  async function applyEvent(event: SessionEvent): Promise<SessionResult> {
+    const result = applySessionEvent(session, event, ctx);
+    // Don't rewrite an unchanged running timer, so a rest the expiry
+    // handler just cleared can't be written back. Clearing is always safe.
+    const nextTimer = result.state.timer;
+    const timerUpdate = nextTimer === null || nextTimer !== session.timer ? nextTimer : undefined;
+    await commitActiveWorkoutAtomic(toActiveWorkout(result.state), timerUpdate);
+    session = result.state;
+    await runEffects(event, result);
+    return result;
+  }
 
-    const group = volumeGroups.get(groupKey);
-    const progress = computeVolumeProgress(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
-    const pendingBonusIndex = findRemovableBonusSetIndex(groupKey, workoutSets, currentSetIndex);
-
-    if (progress && progress.cumulative >= progress.target) {
-      if (pendingBonusIndex !== null) {
-        workoutSets.splice(pendingBonusIndex, 1);
+  async function runEffects(event: SessionEvent, result: SessionResult) {
+    const next = result.state;
+    switch (event.type) {
+      case 'completeSet': {
+        syncLiveActivity(null);
+        const hasNextSet = next.currentSetIndex < next.workoutSets.length;
+        if (result.restStarted && next.timer) {
+          await startRestTimer(next.timer);
+          // e.g. an accessory is next during a primary set's rest.
+          if (!next.restLocksDone) setDoneButtonDisabled(false);
+        } else if (hasNextSet && next.restLocksDone && next.timer) {
+          // e.g. an accessory was done during a still-running rest.
+          setDoneButtonDisabled(true);
+        }
+        renderSets();
+        break;
       }
-      return;
-    }
-
-    // A bonus set may already be pending (not yet completed) for this group.
-    // Its owedReps was computed from the deficit at the moment it was added —
-    // if a since-edited earlier set changed that deficit without fully
-    // closing it, keep the pending bonus in sync instead of leaving it stale
-    // (both the displayed prescription and the reps-stepper cap derive from
-    // this value, so a stale owedReps can under- or over-prescribe it).
-    if (group && progress && pendingBonusIndex !== null) {
-      workoutSets[pendingBonusIndex] = {
-        ...workoutSets[pendingBonusIndex],
-        owedReps: computeOwedReps(group, progress.cumulative),
-      };
-      return;
-    }
-
-    const decision = evaluateBonusSetNeed(groupKey, workoutSets, actualReps, currentSetIndex, volumeGroups);
-    if (decision.shouldAdd) {
-      const groupSet = workoutSets.find((s) => getVolumeGroupKey(s) === groupKey);
-      if (!groupSet) return;
-      const isAccessory = groupSet.tmPercentage === null;
-      const insertIndex = computeBonusInsertionIndex(workoutSets, currentSetIndex, isAccessory);
-      workoutSets.splice(insertIndex, 0, {
-        exerciseId: groupSet.exerciseId,
-        tmPercentage: groupSet.tmPercentage,
-        tmLiftId: groupSet.tmLiftId,
-        // `reps` stays at the group's normal per-set value (not the owed
-        // amount) so this bonus set still resolves to the same volume
-        // group — getVolumeGroupKey folds `reps` into the group identity.
-        reps: groupSet.reps,
-        owedReps: decision.prescribedReps,
-        isAmrap: false,
-        isBonus: true,
-      });
+      case 'editSet':
+        break;
+      case 'skipRest':
+        endRestEarly();
+        break;
+      case 'adjustRest':
+        if (!next.timer) {
+          endRestEarly();
+        } else {
+          cancelBackgroundTimerNotification();
+          scheduleBackgroundTimerNotification(next.timer.expectedEndTime);
+          syncLiveActivity(next.timer.expectedEndTime);
+        }
+        break;
+      case 'restExpired':
+        break;
     }
   }
 
+  function endRestEarly() {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = null;
+    timerEl.classList.add('hidden');
+    setDoneButtonDisabled(false);
+    cancelBackgroundTimerNotification();
+    syncLiveActivity(null);
+  }
+
   async function markSetDone() {
-    const set = workoutSets[currentSetIndex];
-    const weight = getSetWeight(set, tmMap);
-    // A bonus set may be prescribed fewer reps than a normal set (see
-    // reconcileVolumeGroup) — that's what "done, unedited" and the missed-
-    // reps comparison should measure against, not the full per-set count.
-    const effectiveReps = set.owedReps ?? set.reps;
+    const set = session.workoutSets[session.currentSetIndex];
+    if (!set) return;
+    const effectiveReps = getEffectiveReps(set);
 
     let actualReps = effectiveReps;
     const stepperValue = setsContainer.querySelector('[data-testid="stepper-value"]') as HTMLElement | null;
@@ -646,70 +665,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (isNaN(actualReps)) actualReps = effectiveReps;
     }
 
-    completedSets.push({
-      exerciseId: set.exerciseId,
-      prescribedReps: effectiveReps,
-      actualReps,
-      weight,
-      isAmrap: set.isAmrap,
-      timestamp: Date.now(),
-    });
-
-    const justCompletedSet = set;
-    currentSetIndex++;
-
-    // If the completed set was in a volume group and the cumulative reps
-    // still fall short of the target, append a bonus set at the original
-    // per-set reps so the user can grind out the remaining volume.
-    const groupKey = getVolumeGroupKey(justCompletedSet);
-    if (groupKey) {
-      reconcileVolumeGroup(groupKey);
-    }
-
-    // Persist in-progress state to IndexedDB
-    await putActiveWorkout({
-      templateId: state!.templateId,
-      cycle: state!.cycle,
-      weekIndex: state!.weekIndex,
-      dayIndex: state!.dayIndex,
-      completedSets: [...completedSets],
-      currentSetIndex,
-      startedAt: workoutStartTime,
-      workoutSets: [...workoutSets],
-    });
-    syncLiveActivity(null);
-
-    // Rest timer logic
-    if (currentSetIndex < workoutSets.length) {
-      if (settings.intersperseAccessories) {
-        const isCompletedPrimary = justCompletedSet.tmPercentage !== null;
-        const nextSet = workoutSets[currentSetIndex];
-        const isNextAccessory = nextSet.tmPercentage === null;
-
-        if (isCompletedPrimary) {
-          // After primary set: start rest timer
-          await startRestTimer();
-          if (isNextAccessory) {
-            // Next is accessory — keep done button enabled so user can do it during rest
-            setDoneButtonDisabled(false);
-          }
-        }
-        // After accessory set: no new timer. If timer still running, disable done button.
-        if (!isCompletedPrimary) {
-          const existingTimer = await getTimerState();
-          if (existingTimer && getRemainingMs(existingTimer) > 0) {
-            setDoneButtonDisabled(true);
-          }
-        }
-      } else {
-        await startRestTimer();
-      }
-    }
-
-    renderSets();
+    await dispatch(() => applyEvent({ type: 'completeSet', at: Date.now(), reps: actualReps }));
   }
 
   function liveActivityState() {
+    const { workoutSets, currentSetIndex } = session;
     const exerciseId = workoutSets[currentSetIndex]?.exerciseId ?? '';
     return {
       dayName: day.name,
@@ -779,6 +739,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         timerInterval = null;
       }
       await putTimerState(null);
+      session = applySessionEvent(session, { type: 'restExpired' }, ctx).state;
       if (isLiveExpiry) {
         setDoneButtonDisabled(false);
         syncLiveActivity(null);
@@ -808,7 +769,8 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     }
   }
 
-  async function startRestTimer(restSeconds = settings.restTimerSeconds) {
+  // `timer` is already committed to IndexedDB by applyEvent().
+  async function startRestTimer(timer: TimerState) {
     // Cancel any stale "Time's Up!" auto-dismiss from a previous expired timer.
     if (timerExpiredTimeout !== null) {
       clearTimeout(timerExpiredTimeout);
@@ -828,8 +790,6 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     // this new one's eventual expiry to be handled too.
     timerExpiryHandled = false;
 
-    const timer = createTimerState(restSeconds);
-    await putTimerState(timer);
     scheduleBackgroundTimerNotification(timer.expectedEndTime);
     syncLiveActivity(timer.expectedEndTime);
 
@@ -888,48 +848,6 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     timerExpiredTimeout = setTimeout(dismiss, 10000);
   }
 
-  function detectFailures() {
-    const mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }> = [];
-    const bbbFailed: Array<{ exerciseId: string; got: number; target: number }> = [];
-
-    // Main 5/3/1 sets are evaluated per-set (TM is the feedback loop).
-    // AMRAP sets have no upper cap, but missing the prescribed minimum
-    // still counts as a failure per Wendler's rules.
-    workoutSets.forEach((set, i) => {
-      const completed = completedSets[i];
-      if (!completed) return;
-      if (completed.actualReps >= set.reps) return;
-      if (set.tmPercentage === null) return;
-      if (set.tmPercentage <= 0.5) return;
-      mainFailed.push({ exerciseId: set.exerciseId, got: completed.actualReps, prescribed: set.reps });
-    });
-
-    // BBB volume groups are evaluated against the group's TOTAL rep target.
-    // Bonus sets are already factored in via cumulative actualReps, so a
-    // user who grinds out 50 reps across 7 sets reads as a success.
-    type GroupTotal = { exerciseId: string; cumulative: number; target: number };
-    const groupTotals = new Map<string, GroupTotal>();
-    for (const [groupKey, group] of volumeGroups) {
-      const firstSet = workoutSets.find((s) => getVolumeGroupKey(s) === groupKey);
-      if (!firstSet || firstSet.tmPercentage === null) continue;
-      groupTotals.set(groupKey, { exerciseId: firstSet.exerciseId, cumulative: 0, target: group.target });
-    }
-    workoutSets.forEach((s, i) => {
-      const k = getVolumeGroupKey(s);
-      if (k === null) return;
-      const g = groupTotals.get(k);
-      if (!g) return;
-      g.cumulative += completedSets[i]?.actualReps ?? 0;
-    });
-    for (const g of groupTotals.values()) {
-      if (g.cumulative < g.target) {
-        bbbFailed.push({ exerciseId: g.exerciseId, got: g.cumulative, target: g.target });
-      }
-    }
-
-    return { mainFailed, bbbFailed };
-  }
-
   function showFailureSheet(
     mainFailed: Array<{ exerciseId: string; got: number; prescribed: number }>,
     bbbFailed: Array<{ exerciseId: string; got: number; target: number }>,
@@ -986,18 +904,9 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     });
   }
 
-  async function completeWorkout() {
-    const log: WorkoutLog = {
-      id: `workout-${Date.now()}`,
-      templateId: state!.templateId,
-      cycle: state!.cycle,
-      weekIndex: state!.weekIndex,
-      dayIndex: state!.dayIndex,
-      dayName: day!.name,
-      sets: completedSets,
-      startedAt: workoutStartTime,
-      completedAt: Date.now(),
-    };
+  // Must run inside dispatch(). `at` is when the user finished.
+  async function completeWorkout(at: number) {
+    const log = buildWorkoutLog(session, state!, day!.name, at);
 
     const result = advanceState(state!, template!);
     const tmBumps = (result.tmBumps ?? []).map((bump) => ({
@@ -1019,11 +928,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     cancelBackgroundTimerNotification();
     void endWorkoutActivity();
 
-    const { mainFailed, bbbFailed } = detectFailures();
+    const { mainFailed, bbbFailed } = detectFailures(session, ctx.volumeGroups);
     await logEvent(
       'info',
       'workout completed',
-      `${day!.name} — ${completedSets.length} sets; missed main=${mainFailed.length} bbb=${bbbFailed.length}`,
+      `${day!.name} — ${session.completedSets.length} sets; missed main=${mainFailed.length} bbb=${bbbFailed.length}`,
     );
     if (mainFailed.length > 0 || bbbFailed.length > 0) {
       showFailureSheet(mainFailed, bbbFailed);
@@ -1069,7 +978,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       if (timerInterval) clearInterval(timerInterval);
       cancelBackgroundTimerNotification();
       void endWorkoutActivity();
-      await logEvent('info', 'workout abandoned', `${day!.name} after ${completedSets.length} sets`);
+      await logEvent('info', 'workout abandoned', `${day!.name} after ${session.completedSets.length} sets`);
       navigate('home');
     });
 
@@ -1078,16 +987,13 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
     });
   });
 
-  completeBtn.addEventListener('click', completeWorkout);
+  completeBtn.addEventListener('click', () => {
+    const at = Date.now();
+    void dispatch(() => completeWorkout(at));
+  });
 
-  document.getElementById('skip-timer-btn')?.addEventListener('click', async () => {
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = null;
-    timerEl.classList.add('hidden');
-    setDoneButtonDisabled(false);
-    cancelBackgroundTimerNotification();
-    syncLiveActivity(null);
-    await putTimerState(null);
+  document.getElementById('skip-timer-btn')?.addEventListener('click', () => {
+    void dispatch(() => applyEvent({ type: 'skipRest' }));
   });
 
   // On iOS, backgrounding the app for long enough can freeze the main
@@ -1115,6 +1021,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   if (existingTimer) {
     const remaining = getRemainingMs(existingTimer);
     if (remaining > 0) {
+      session = { ...session, timer: existingTimer, restLocksDone: true };
       liveActivityRestEndTime = existingTimer.expectedEndTime;
       timerEl.classList.remove('hidden');
       setDoneButtonDisabled(true);
@@ -1153,39 +1060,4 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
   renderSets();
   void startWorkoutActivity(liveActivityState());
-}
-
-/**
- * Intersperse accessory sets between primary (main + BBB) sets.
- * Primary sets keep their order; accessories are inserted one at a time
- * after each primary set until all accessories are placed.
- */
-function intersperseSets(sets: TemplateSet[]): TemplateSet[] {
-  const primary: TemplateSet[] = [];
-  const accessory: TemplateSet[] = [];
-
-  for (const set of sets) {
-    if (set.tmPercentage !== null) {
-      primary.push(set);
-    } else {
-      accessory.push(set);
-    }
-  }
-
-  const result: TemplateSet[] = [];
-  let accIdx = 0;
-
-  for (const p of primary) {
-    result.push(p);
-    if (accIdx < accessory.length) {
-      result.push(accessory[accIdx++]);
-    }
-  }
-
-  // Any remaining accessories go at the end
-  while (accIdx < accessory.length) {
-    result.push(accessory[accIdx++]);
-  }
-
-  return result;
 }
