@@ -1,3 +1,5 @@
+// iOS only: watchOS has no UIScrollView. See Package.swift.
+#if os(iOS)
 import UIKit
 
 /// Configuration for the WKWebView's underlying UIScrollView that Capacitor
@@ -17,3 +19,4 @@ public enum WebViewScrollChrome {
         scrollView.showsHorizontalScrollIndicator = false
     }
 }
+#endif
