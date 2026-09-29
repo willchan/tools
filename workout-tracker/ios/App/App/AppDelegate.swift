@@ -7,7 +7,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Before any UI: a launch can be a background wake from the watch,
+        // and its taps must reach the disk queue whether or not a WebView
+        // ever loads. See WatchConnectivityCoordinator.
+        WatchConnectivityCoordinator.shared.activate()
         return true
     }
 
