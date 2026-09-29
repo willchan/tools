@@ -112,6 +112,13 @@ export interface ActiveWorkout {
   startedAt: number;
   /** Effective set sequence (intersperse applied, any bonus sets included). */
   workoutSets?: TemplateSet[];
+  /**
+   * Ids of Apple Watch events already applied to this workout. Stored on the
+   * same record as the sets they produced, so a set and the id of the tap
+   * that created it are always committed together, and a redelivered tap
+   * is recognized as a duplicate. Absent when no watch event was applied.
+   */
+  appliedEventIds?: string[];
 }
 
 /** A persistent log entry kept for diagnostic exports. */

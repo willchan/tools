@@ -12,6 +12,7 @@ import { defineConfig, devices } from '@playwright/test';
 const crossProjectSpecs = [
   'pwa.spec.ts',
   'native-platform.spec.ts',
+  'watch-bridge.spec.ts',
   'wakelock.spec.ts',
   'background-timer.spec.ts',
   'timer.spec.ts',

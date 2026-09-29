@@ -207,6 +207,27 @@ export async function completeWorkoutAtomic(data: CompleteWorkoutData): Promise<
   await tx.done;
 }
 
+/**
+ * Persist an in-progress workout and its rest timer together, so the two can
+ * never disagree after an interruption (e.g. a set logged but the rest that
+ * followed it lost). A null timer clears any stored one; undefined leaves
+ * the stored timer untouched.
+ */
+export async function commitActiveWorkoutAtomic(
+  workout: ActiveWorkout,
+  timer: TimerState | null | undefined,
+): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['state', 'timer'], 'readwrite');
+  await tx.objectStore('state').put(workout, 'activeWorkout');
+  if (timer) {
+    await tx.objectStore('timer').put(timer, 'current');
+  } else if (timer === null) {
+    await tx.objectStore('timer').delete('current');
+  }
+  await tx.done;
+}
+
 /** Delete a template and, if it was the active one, repoint progression state
  *  at a remaining template — as a single atomic operation. */
 export async function deleteTemplateAtomic(id: string): Promise<void> {

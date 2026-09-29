@@ -16,11 +16,15 @@ workout-tracker/
 │   ├── logic/
 │   │   ├── calculator.ts     # Weight calculation, plate calculator, TM math
 │   │   ├── progression.ts    # State machine for day/week/cycle advancement
-│   │   └── timer.ts          # Resilient rest timer (survives tab suspension)
+│   │   ├── timer.ts          # Resilient rest timer (survives tab suspension)
+│   │   ├── workoutSession.ts # Pure reducer for every in-workout action (phone and watch)
+│   │   └── watchProtocol.ts  # Apple Watch tap validation and display-ready snapshots
 │   ├── native/                # iOS-native code paths (no-op on web)
 │   │   ├── platform.ts        # Capacitor.isNativePlatform() wrapper
 │   │   ├── liveActivity.ts    # Lock screen / Dynamic Island Live Activity
-│   │   └── otaUpdate.ts       # Self-hosted OTA web-bundle updates
+│   │   ├── otaUpdate.ts       # Self-hosted OTA web-bundle updates
+│   │   ├── watchBridge.ts     # Our WatchBridge Capacitor plugin (+ watchBridgeWeb.ts test double)
+│   │   └── watch.ts           # Apple Watch remote wiring (see docs/adr/0002)
 │   └── ui/
 │       ├── router.ts         # Hash-based SPA router
 │       ├── home.ts           # Home screen with "Start Next Workout" flow
@@ -55,6 +59,13 @@ workout-tracker/
 
 ## Key Design Decisions
 
+Larger architectural decisions are recorded as ADRs in [`docs/adr/`](docs/adr/):
+
+- [0001 — Web-first with a Capacitor shell](docs/adr/0001-web-first-with-capacitor-shell.md)
+- [0002 — Apple Watch as a thin remote](docs/adr/0002-apple-watch-remote.md)
+
+App-specific contributor rules (native shell, `AppLogic`, the watch target) are in [`CLAUDE.md`](CLAUDE.md).
+
 ### Offline-First
 All data is stored in IndexedDB using the `idb` wrapper. The app functions fully offline. A service worker caches the app shell with a network-first strategy.
 
@@ -76,6 +87,7 @@ An optional native iOS shell lives alongside the PWA — same `src/`, wrapped by
 - `src/native/platform.ts` — `Capacitor.isNativePlatform()` wrapper used to branch native/web code paths.
 - `src/native/liveActivity.ts` — start/update/end a Live Activity via the `capacitor-live-activity` plugin; no-op on web.
 - `src/native/otaUpdate.ts` — self-hosted over-the-air web-bundle updates via `@capgo/capacitor-updater`, since Capacitor bakes `dist/` into the binary at build time.
+- `src/native/watch.ts` + `src/native/watchBridge.ts` — Apple Watch remote ([ADR 0002](docs/adr/0002-apple-watch-remote.md)). Watch taps go through the same reducer (`src/logic/workoutSession.ts`) as phone taps. They're committed together with an idempotency id, rejected if their `setId` is stale, and acked to the native queue only after the commit. The phone pushes numbered snapshots back. `WatchBridge` is our own plugin: its web implementation (`watchBridgeWeb.ts`) plays the native side in tests, and the native side (WatchConnectivity + disk queue) is the next step. Until it ships, all of this is inactive on iOS.
 - `src/ui/notifications.ts` — on native, rest-timer notifications are scheduled with `@capacitor/local-notifications` using an absolute fire time (`schedule.at`), instead of the web path's service-worker `setTimeout`, which iOS can suspend before it elapses. Haptics use `@capacitor/haptics` in place of the web's `navigator.vibrate` (unimplemented in WebKit).
 - `src/ui/settings.ts` — the "Export Data" button writes the JSON via `@capacitor/filesystem` and opens the native share sheet (`@capacitor/share`) on native, since a browser `<a download>` blob produces no usable file inside a WKWebView shell. Import is unchanged — the `<input type="file">` picker works as-is.
 
@@ -93,7 +105,7 @@ cd workout-tracker && bun run cap:sync       # build + `cap sync ios`
 
 `e2e/native-platform.spec.ts` covers the native branches added above — it forces `Capacitor.isNativePlatform()` via `window.CapacitorCustomPlatform` (Capacitor's own supported override) and asserts each plugin call, using the real "web" fallback implementations already in each installed package rather than hand-rolled mocks. This runs as part of the normal Playwright suite (no Mac needed) and catches wiring regressions (wrong arguments, a call site removed, a missing await), but can't verify real ActivityKit/UNUserNotificationCenter behavior.
 
-The Swift side (`ios/App/App`, `ios/App/LiveActivityWidget`) has no unit test target of its own — Apple's CLI has no way to add one to an `.xcodeproj` without Xcode's GUI. Instead, real Swift logic lives in `ios/App/AppLogic`, a standalone local Swift package with its own XCTest suite, tested via `xcodebuild test -scheme AppLogic` directly against a bare `Package.swift` (no Xcode project needed) — see `ios/MANUAL_SETUP.md` for what each of the four test layers (Playwright wiring tests, `AppLogic`'s XCTest suite, the CI Simulator smoke test, manual on-device verification) does and doesn't cover, and how to add a package dependency to the `App` target.
+The Swift side (`ios/App/App`, `ios/App/LiveActivityWidget`) has no unit test target of its own. (Adding targets doesn't need Xcode's GUI: `AppUITests` was added headlessly with the `xcodeproj` gem, see `ios/MANUAL_SETUP.md`.) Instead, real Swift logic lives in `ios/App/AppLogic`, a standalone local Swift package with its own XCTest suite, tested via `xcodebuild test -scheme AppLogic` directly against a bare `Package.swift` (no Xcode project needed) — see `ios/MANUAL_SETUP.md` for what each of the four test layers (Playwright wiring tests, `AppLogic`'s XCTest suite, the CI Simulator smoke test, manual on-device verification) does and doesn't cover, and how to add a package dependency to the `App` target.
 
 ## PWA Mechanics
 

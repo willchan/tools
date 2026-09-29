@@ -9,6 +9,7 @@ import { renderSettings } from './ui/settings';
 import { installGlobalErrorHandlers, log, pruneOldLogs } from './logic/logger';
 import { installSwTimerLogging } from './ui/notifications';
 import { checkForOtaUpdate } from './native/otaUpdate';
+import { initWatchBridge } from './native/watch';
 
 installGlobalErrorHandlers();
 installSwTimerLogging();
@@ -45,6 +46,7 @@ async function init() {
   // that Xcode compiled it.
   console.log('WORKOUT_TRACKER_APP_READY');
   startRouter();
+  initWatchBridge();
 }
 
 init();
