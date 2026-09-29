@@ -175,10 +175,18 @@ final class WatchEventQueueTests: XCTestCase {
     func testConcurrentAppendsAndAcksAreAllApplied() throws {
         let queue = WatchEventQueue(fileURL: fileURL)
         DispatchQueue.concurrentPerform(iterations: 40) { i in
-            XCTAssertNoThrow(try queue.append(self.event("e\(i)"), receivedAt: Double(i)))
+            do {
+                try queue.append(self.event("e\(i)"), receivedAt: Double(i))
+            } catch {
+                XCTFail("append e\(i): \(error)")
+            }
         }
         DispatchQueue.concurrentPerform(iterations: 20) { i in
-            XCTAssertNoThrow(try queue.ack(id: "e\(i * 2)"))
+            do {
+                try queue.ack(id: "e\(i * 2)")
+            } catch {
+                XCTFail("ack e\(i * 2): \(error)")
+            }
         }
         let expected = Set((0..<20).map { "e\($0 * 2 + 1)" })
         XCTAssertEqual(Set(queue.pending().map(\.event.id)), expected)
