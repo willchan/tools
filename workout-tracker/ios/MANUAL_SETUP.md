@@ -71,7 +71,9 @@ Five layers exist, each covering something the others can't:
    Our own `WatchBridge` plugin ships a web implementation for the same
    purpose (`src/native/watchBridgeWeb.ts`, driven by
    `e2e/watch-bridge.spec.ts`): it records snapshots and acks and can emit
-   watch taps.
+   watch taps. `e2e/watch-protocol.spec.ts` also checks `AppLogic`'s watch
+   protocol JSON fixtures against the TS, so the Swift mirrors (layer 2) and
+   the TS protocol are held to the same files.
 2. **`AppLogic`'s XCTest suite (CI only, no Mac needed).** `App` and
    `LiveActivityWidget` are Xcode targets with no unit test target of their
    own — adding one means editing `App.xcodeproj`'s target graph, which has
@@ -85,7 +87,15 @@ Five layers exist, each covering something the others can't:
    `WebViewScrollChrome`, the `MainViewController` scroll-indicator
    config) gets actual regression coverage, run in `ios.yml` on every
    push. New Swift logic should go here, not inlined in
-   `App`/`LiveActivityWidget`.
+   `App`/`LiveActivityWidget`. The package is multi-platform (iOS +
+   watchOS) because the watch app shares its watch protocol types, disk
+   queue and snapshot ordering (`WatchProtocol.swift`, `WatchEventQueue`,
+   `WatchInbox`, `WatchSnapshotGate`), so `ios.yml` runs the same suite on
+   a watchOS Simulator too (the `applogic-watchos` job). Keep UIKit-only
+   code and its tests behind `#if os(iOS)`. The native `WatchBridge` plugin
+   in `App` (`WatchBridgePlugin.swift`, `WatchConnectivityCoordinator.swift`)
+   is glue over these and, like the rest of `App`, is only covered by the
+   build, the smoke test and a real device.
 3. **`ios.yml`'s Simulator smoke test (CI only, no Mac needed).** Boots a
    real iOS Simulator, installs the built app, and confirms the WKWebView
    actually loads and runs the web bundle inside the native shell (via a

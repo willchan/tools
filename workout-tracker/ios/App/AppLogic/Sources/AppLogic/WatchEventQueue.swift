@@ -49,7 +49,7 @@ public final class WatchEventQueue {
     public init(fileURL: URL, ackedIDLimit: Int = WatchEventQueue.defaultAckedIDLimit) {
         self.fileURL = fileURL
         self.ackedIDLimit = ackedIDLimit
-        let empty = Contents(version: Self.formatVersion, pending: [], acked: [])
+        let empty = Contents(version: WatchEventQueue.formatVersion, pending: [], acked: [])
 
         guard let data = try? Data(contentsOf: fileURL) else {
             // Missing (the usual first run) or unreadable as a file at all.
@@ -58,12 +58,12 @@ public final class WatchEventQueue {
             return
         }
         if let decoded = try? JSONDecoder().decode(Contents.self, from: data),
-           decoded.version == Self.formatVersion {
+           decoded.version == WatchEventQueue.formatVersion {
             contents = decoded
             recoveredCorruptFileURL = nil
         } else {
             contents = empty
-            recoveredCorruptFileURL = Self.setAside(fileURL)
+            recoveredCorruptFileURL = WatchEventQueue.setAside(fileURL)
         }
     }
 
