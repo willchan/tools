@@ -129,6 +129,9 @@ If it fails, check the logs for:
 | **Code signing fails** | "Certificate not found" in logs | Signing certificates are stored in GitHub Secrets. Nothing to do — contact repo maintainer if it persists. |
 | **Build appears stuck** | Workflow hasn't updated in 15+ min | GitHub runners sometimes stall. Cancel and retry. |
 | **Build not in TestFlight** | App Store Connect shows upload failed | Check workflow logs for errors; likely temporary Apple issue. Retry in 10 minutes. |
+| **"Missing Compliance" on a build** | Build is in App Store Connect but not installable | Shouldn't happen: `ITSAppUsesNonExemptEncryption = false` in `App/Info.plist` answers the export-compliance question automatically (the app only uses OS-provided HTTPS, which is exempt). If it reappears, check that key is still there. |
+| **Agreement errors** | `PLA Update available` at Archive, or `FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED` at Upload | Apple published new terms. Accept them as Account Holder: the Program License Agreement on developer.apple.com, and anything pending under App Store Connect → Business. Then re-run. |
+| **Certificate limit** | `Your account has reached the maximum number of certificates` at Archive | Each run creates a new Apple Development certificate. Revoke old CI-created ones at developer.apple.com → Certificates (keep the Apple Distribution one), then re-run. |
 | **Old version shows** | TestFlight shows v1.0.0 instead of v1.0.1 | Apple caches version metadata. Refresh TestFlight app or wait 5 min and restart. |
 
 ---
