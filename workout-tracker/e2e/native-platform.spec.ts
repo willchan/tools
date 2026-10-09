@@ -65,6 +65,20 @@ test.describe('Capacitor iOS zoom config', () => {
   });
 });
 
+test.describe('iOS export compliance', () => {
+  // Without ITSAppUsesNonExemptEncryption, App Store Connect holds every
+  // TestFlight build as "Missing Compliance" until someone answers the
+  // encryption question by hand. The app's only encryption is the HTTPS the
+  // OS provides (OTA bundle fetches in src/native/otaUpdate.ts), which is
+  // exempt, so the honest answer is false. Revisit if the app ever ships its
+  // own cryptography.
+  test('Info.plist declares no non-exempt encryption', async () => {
+    const { readFileSync } = await import('node:fs');
+    const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
+    expect(plist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+  });
+});
+
 test.describe('Native rest-timer notifications', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
