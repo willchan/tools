@@ -93,7 +93,21 @@ Linux) and paste the resulting text as the secret value:
 | `ASC_API_KEY_ID` | Key ID from step 2 |
 | `ASC_API_ISSUER_ID` | Issuer ID from step 2 |
 | `ASC_API_KEY_P8_BASE64` | base64 of the `.p8` from step 2 |
+| `APPLE_DEV_CERT_P12_BASE64` | base64 of a long-lived **Apple Development** certificate's `.p12` (see below) |
+| `APPLE_DEV_CERT_PASSWORD` | that `.p12`'s password |
 | `CI_KEYCHAIN_PASSWORD` | any random string — only locks the throwaway CI keychain for the duration of one job |
+
+**Why a development certificate too:** `xcodebuild archive` with automatic
+signing signs for development first, and the export step re-signs with
+Distribution. Without a development identity in the CI keychain, Xcode
+creates a new Apple Development certificate through the API key on every
+run, until the account hits Apple's certificate limit and archives fail with
+"Your account has reached the maximum number of certificates". To set it up,
+create one Apple Development certificate from a CSR (the same way as the
+distribution one in step 3), convert it to a `.p12` with the matching
+private key, and store it as the two secrets above. It's valid for a year;
+when it expires, repeat with a fresh CSR. Without these secrets the workflow
+still runs, but it logs a warning and creates a new certificate every time.
 
 If you created an `APPLE_PROVISIONING_PROFILE_BASE64` secret from an
 earlier version of this doc, it's no longer used — fine to leave it or
