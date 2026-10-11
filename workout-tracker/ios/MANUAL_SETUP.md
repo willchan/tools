@@ -95,7 +95,14 @@ Five layers exist, each covering something the others can't:
    code and its tests behind `#if os(iOS)`. The native `WatchBridge` plugin
    in `App` (`WatchBridgePlugin.swift`, `WatchConnectivityCoordinator.swift`)
    is glue over these and, like the rest of `App`, is only covered by the
-   build, the smoke test and a real device.
+   build, the smoke test and a real device. The same goes for the watch
+   app (`ios/App/WatchApp`): its decisions (what to show, when Done is
+   enabled, "Waiting for iPhone…", the rest-over haptic) are AppLogic's
+   `WatchRemoteState` and `RestEndAlarm`, and the SwiftUI, WatchConnectivity
+   and HealthKit glue around them is verified by compiling (it builds with
+   every `App` build), `ios.yml`'s check that the watch app is embedded
+   with the right Info.plist keys, `e2e/native-platform.spec.ts`'s config
+   guards, and a real watch.
 3. **`ios.yml`'s Simulator smoke test (CI only, no Mac needed).** Boots a
    real iOS Simulator, installs the built app, and confirms the WKWebView
    actually loads and runs the web bundle inside the native shell (via a
@@ -253,3 +260,17 @@ new test target still needs an explicit scheme). Regenerating the scheme
 by hand means copying `App`'s `BlueprintIdentifier`/`BuildableName` and the
 new target's into the `<BuildableReference>` elements — see the committed
 file for the exact shape Xcode expects.
+
+### Add the Apple Watch app target
+
+`WatchApp` (ADR 0002 step 3) was added by a checked-in script rather than
+the GUI: [`ios/scripts/add-watch-app-target.rb`](scripts/add-watch-app-target.rb),
+run once with `ruby workout-tracker/ios/scripts/add-watch-app-target.rb`
+(`gem install xcodeproj` first). It refuses to run twice. It creates a
+single-target watchOS 10 app whose sources are the `ios/App/WatchApp`
+folder as a file-system synchronized group (so new Swift files there need
+no `.pbxproj` edits), links `AppLogic`, embeds the app in `App` under
+"Embed Watch Content", and sets the HealthKit entitlements and iOS 17
+deployment target. No shared scheme is needed: it's built and archived as
+part of `App`. Its signing needs the portal steps in
+`TESTFLIGHT_SETUP.md`, "4b. Apple Watch app and HealthKit".
