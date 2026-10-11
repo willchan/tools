@@ -77,7 +77,7 @@ export function initWatchBridge(): void {
   initialized = true;
   void WatchBridge.addListener('watchEvent', (event) => {
     void receive(event);
-  }).catch((err) => warn('watch listener registration failed', err));
+  }).catch((err) => logFailure('watch listener registration failed', err));
   void drainPending();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void drainPending();
@@ -92,7 +92,7 @@ async function drainPending(): Promise<void> {
     const { events } = await WatchBridge.getPendingEvents();
     for (const event of events) await receive(event);
   } catch (err) {
-    warn('watch queue drain failed', err);
+    logFailure('watch queue drain failed', err);
   }
 }
 
@@ -129,7 +129,7 @@ async function receive(event: ReceivedWatchEvent): Promise<void> {
     await finish(event, await current.handleEvent(event));
   } catch (err) {
     // Not acked: it stays in the native queue for the next drain.
-    warn(`watch event ${event.id} failed`, err);
+    logFailure('watch event failed', err, `id=${event.id} type=${event.type}`);
   }
 }
 
@@ -195,7 +195,7 @@ export async function pushWatchSnapshot(): Promise<void> {
     const source = liveHost()?.snapshotSource() ?? null;
     await WatchBridge.pushSnapshot({ snapshot: buildWatchSnapshot(nextSeq(), source) });
   } catch (err) {
-    warn('watch snapshot push failed', err);
+    logFailure('watch snapshot push failed', err);
   }
 }
 
@@ -213,10 +213,16 @@ export async function startWatchWorkout(): Promise<void> {
   try {
     await WatchBridge.startWatchApp();
   } catch (err) {
-    warn('watch app start failed', err);
+    logFailure('watch app start failed', err);
   }
 }
 
-function warn(message: string, err: unknown): void {
-  void log('warn', `${message}: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+/**
+ * A bridge call failed, so the watch and phone may be out of step. Logged as
+ * an error so the Settings tab shows its badge; expected outcomes (stale or
+ * duplicate taps, the per-tap latency lines) are logged elsewhere at lower
+ * levels and never come through here.
+ */
+function logFailure(message: string, err: unknown, context?: string): void {
+  void log('error', `${message}: ${err instanceof Error ? err.message : String(err)}`, context).catch(() => {});
 }

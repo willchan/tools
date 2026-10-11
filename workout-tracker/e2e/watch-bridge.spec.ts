@@ -367,6 +367,76 @@ test.describe('Apple Watch bridge — native', () => {
   });
 });
 
+/**
+ * A watch-bridge call that fails means the watch is out of step with the
+ * phone, so it's logged as an error, which is what puts a count badge on the
+ * Settings tab (see debug-logs-alerts.spec.ts). Expected outcomes, such as a
+ * stale or redelivered tap, are not errors and must not badge every workout.
+ */
+test.describe('Apple Watch bridge — failures reach the Settings error badge', () => {
+  test.beforeEach(async ({ page }) => {
+    await forceNative(page);
+  });
+
+  /** Make one WatchBridge method reject, as the native plugin would on failure. */
+  async function breakBridge(page: Page, method: 'pushSnapshot' | 'startWatchApp') {
+    await page.evaluate(async (m) => {
+      const { watchBridgeWeb } = await import('/src/native/watchBridgeWeb.ts');
+      (watchBridgeWeb as unknown as Record<string, () => Promise<void>>)[m] = async () => {
+        throw new Error(`${m} broke`);
+      };
+    }, method);
+  }
+
+  async function newErrors(page: Page): Promise<string[]> {
+    return page.evaluate(async () => {
+      const { getNewErrorSummary } = await import('/src/logic/logger.ts');
+      return (await getNewErrorSummary()).messages;
+    });
+  }
+
+  async function settingsBadge(page: Page) {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    return page.locator('.nav-btn[data-route="settings"] [data-testid="nav-badge"]');
+  }
+
+  test('a failed watch app launch shows the error badge', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    await breakBridge(page, 'startWatchApp');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    await expect.poll(() => newErrors(page)).toEqual(['watch app start failed: startWatchApp broke']);
+    await expect(await settingsBadge(page)).toHaveText('1');
+  });
+
+  test('a failed snapshot push shows the error badge', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    await breakBridge(page, 'pushSnapshot');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+
+    await expect.poll(() => newErrors(page)).toEqual(['watch snapshot push failed: pushSnapshot broke']);
+    await expect(await settingsBadge(page)).toHaveText('1');
+  });
+
+  test('applied, redelivered and stale taps are not errors', async ({ page }) => {
+    await startWorkout(page);
+    const before = await latestSnapshot(page);
+    const tap = { v: 1, id: 'ok', at: Date.now(), type: 'completeSet', setId: before.workout!.setId };
+    await emit(page, tap);
+    await emit(page, tap);
+    await emit(page, { ...tap, id: 'late' });
+    await expect.poll(async () => (await recorded(page)).acks).toEqual(['ok', 'ok', 'late']);
+
+    expect(await newErrors(page)).toEqual([]);
+    await expect(await settingsBadge(page)).toHaveCount(0);
+  });
+});
+
 test.describe('Apple Watch bridge — parity', () => {
   test('a watch completeSet leaves IndexedDB identical to the same phone tap', async ({ browser }) => {
     const fixedNow = new Date('2026-09-27T10:00:00Z');
