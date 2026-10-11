@@ -17,7 +17,7 @@ final class WorkoutSessionController: NSObject, ObservableObject {
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
 
-    static func strengthTraining() -> HKWorkoutConfiguration {
+    nonisolated static func strengthTraining() -> HKWorkoutConfiguration {
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = .traditionalStrengthTraining
         configuration.locationType = .indoor
