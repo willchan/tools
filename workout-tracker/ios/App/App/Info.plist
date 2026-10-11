@@ -26,6 +26,10 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Workout Tracker reads the heart rate and calories from workouts you track on your Apple Watch, so they stay with your training log.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Workout Tracker saves your strength training workouts to Apple Health, so they count toward your Activity rings.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
