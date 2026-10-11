@@ -77,6 +77,17 @@ test.describe('iOS export compliance', () => {
     const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
     expect(plist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
   });
+
+  // App Store Connect rejects any build whose binary references HealthKit
+  // (WatchBridgePlugin's HKHealthStore.startWatchApp) without both Health
+  // purpose strings (ITMS-90683), even before the app ever asks for access.
+  test('Info.plist has the Health purpose strings HealthKit requires', async () => {
+    const { readFileSync } = await import('node:fs');
+    const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
+    for (const key of ['NSHealthShareUsageDescription', 'NSHealthUpdateUsageDescription']) {
+      expect(plist).toMatch(new RegExp(`<key>${key}</key>\\s*<string>[^<]{20,}</string>`));
+    }
+  });
 });
 
 test.describe('Native rest-timer notifications', () => {
