@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Unit coverage for src/logic/watchProtocol.ts: the pure rules that decide
@@ -239,5 +241,99 @@ test.describe('watch protocol', () => {
       restAfterSetSeconds: null,
     });
     expect(snaps.idle).toEqual({ v: 1, seq: 9, status: 'idle', workout: null });
+  });
+});
+
+/**
+ * The Swift side mirrors WatchEvent and WatchSnapshot as Codable types in
+ * ios/App/AppLogic, and its XCTests round-trip these JSON fixtures. This
+ * checks the same files against the TS, so a field renamed, made optional or
+ * given a new value on either side fails one suite or the other. Regenerate a
+ * snapshot fixture from the `actual` value printed on failure.
+ */
+test.describe('watch protocol — Swift fixtures', () => {
+  const fixtureDir = fileURLToPath(new URL('../ios/App/AppLogic/Tests/AppLogicTests/Fixtures/', import.meta.url));
+  const fixture = (name: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(`${fixtureDir}${name}`, 'utf8')) as Record<string, unknown>;
+
+  const EVENT_KEYS = ['v', 'id', 'at', 'type', 'setId', 'reps', 'deltaSeconds'];
+  const EVENT_FIXTURES = [
+    'event-start.json',
+    'event-complete-set.json',
+    'event-complete-set-default-reps.json',
+    'event-skip-rest.json',
+    'event-adjust-rest.json',
+    'event-finish.json',
+  ];
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+  });
+
+  test('snapshot fixtures are exactly what buildWatchSnapshot produces', async ({ page }) => {
+    const snaps = await page.evaluate(async () => {
+      const { createSession, createSessionContext, applySessionEvent } = await import('/src/logic/workoutSession.ts');
+      const { buildWatchSnapshot } = await import('/src/logic/watchProtocol.ts');
+      const { getDefault531Template, getDefaultExercises } = await import('/src/db/defaults.ts');
+      const sets = getDefault531Template().weeks[0].days[0].sets;
+      const exercises = getDefaultExercises();
+      const ctx = createSessionContext(sets, new Map([['squat', 225]]), { restTimerSeconds: 120, intersperseAccessories: true });
+      const s0 = createSession(sets, { intersperseAccessories: true, startedAt: 1759100000000 });
+      const s1 = applySessionEvent(s0, { type: 'completeSet', at: 1759100060000 }, ctx).state;
+      return {
+        first: buildWatchSnapshot(1759100000001, { session: s0, ctx, dayName: 'Squat Day', exercises }),
+        resting: buildWatchSnapshot(1759100060001, { session: s1, ctx, dayName: 'Squat Day', exercises }),
+        idle: buildWatchSnapshot(1759100120001, null),
+      };
+    });
+    expect(snaps.first).toEqual(fixture('snapshot-active-first-set.json'));
+    expect(snaps.resting).toEqual(fixture('snapshot-active-resting.json'));
+    expect(snaps.idle).toEqual(fixture('snapshot-idle.json'));
+  });
+
+  test('event fixtures are well-formed WatchEvents the phone accepts', async ({ page }) => {
+    const events = EVENT_FIXTURES.map((name) => ({ name, event: fixture(name) }));
+    for (const { name, event } of events) {
+      for (const key of Object.keys(event)) expect(EVENT_KEYS, `${name}: unexpected key ${key}`).toContain(key);
+      expect(event.v, name).toBe(1);
+    }
+    expect(Object.keys(fixture('event-start.json')).sort()).toEqual(['at', 'id', 'type', 'v']);
+
+    const verdicts = await page.evaluate(async (evs) => {
+      const { createSession } = await import('/src/logic/workoutSession.ts');
+      const { checkWatchEvent, setIdFor } = await import('/src/logic/watchProtocol.ts');
+      const { getDefault531Template } = await import('/src/db/defaults.ts');
+      const s0 = createSession(getDefault531Template().weeks[0].days[0].sets, {
+        intersperseAccessories: true,
+        startedAt: 1759100000000,
+      });
+      return {
+        setId: setIdFor(s0),
+        kinds: evs
+          .filter(({ event }) => event.type !== 'start')
+          .map(({ name, event }) => ({
+            name,
+            kind: checkWatchEvent(s0, event as never, 1759200000000).kind,
+          })),
+      };
+    }, events);
+    // The fixtures carry the setId of the snapshot fixture's first set, so
+    // everything but finish (sets left to do) applies to it.
+    expect(fixture('event-complete-set.json').setId).toBe(verdicts.setId);
+    expect(verdicts.kinds).toEqual([
+      { name: 'event-complete-set.json', kind: 'apply' },
+      { name: 'event-complete-set-default-reps.json', kind: 'apply' },
+      { name: 'event-skip-rest.json', kind: 'apply' },
+      { name: 'event-adjust-rest.json', kind: 'apply' },
+      { name: 'event-finish.json', kind: 'stale' },
+    ]);
+  });
+
+  test('the received-event fixture is a WatchEvent plus receivedAt, as handed to JS', async () => {
+    const received = fixture('received-event-complete-set.json');
+    const { receivedAt, ...event } = received;
+    expect(typeof receivedAt).toBe('number');
+    expect(event).toEqual(fixture('event-complete-set.json'));
   });
 });

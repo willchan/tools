@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "seq": 1759100060001,
+  "status": "active",
+  "workout": {
+    "dayName": "Squat Day",
+    "setId": "1759100000000/1/leg-curl:na:10::",
+    "setNumber": 2,
+    "setTotal": 14,
+    "allSetsDone": false,
+    "exerciseName": "Leg Curl",
+    "weightLabel": "BW / Custom",
+    "plateLabel": null,
+    "reps": 10,
+    "maxReps": 10,
+    "isAmrap": false,
+    "isBonus": false,
+    "restEndTime": 1759100180000,
+    "restLocksDone": false,
+    "restAfterSetSeconds": null
+  }
+}

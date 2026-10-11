@@ -1,6 +1,7 @@
 # 0002. Apple Watch companion as a thin remote
 
-- **Status:** Accepted, 2026-09. Step 1 (TS) is implemented. Steps 2–4 are pending.
+- **Status:** Accepted, 2026-09. Steps 1 (TS) and 2 (native `WatchBridge`,
+  `AppLogic` on iOS + watchOS) are implemented. Steps 3–4 are pending.
 - **Related:** [0001](0001-web-first-with-capacitor-shell.md)
 
 ## Context
@@ -79,6 +80,38 @@ reused by that fallback.
    background mode, iOS deployment target raised to 17, a new watch bundle ID,
    and signing in `ios-testflight.yml`.
 4. TestFlight build, then one real workout to read the latency logs.
+
+### Step 2 notes, for step 3
+
+What the phone side now expects from the watch app:
+
+- **Sending taps.** Build a `WatchEvent` (AppLogic), wrap it with
+  `WatchMessage.eventMessage`, and send it with `transferUserInfo` (guaranteed,
+  queued by the system). When `isReachable`, also `sendMessage` it for
+  latency: a reply with `WatchMessage.ackedID` means it's on the phone's disk;
+  an `error` reply or failure means rely on (or redo) the transfer. The phone
+  dedupes by `id`, so sending both is safe.
+- **Receiving snapshots.** Read `WatchMessage.snapshot(from:)` from
+  `didReceiveApplicationContext` and `receivedApplicationContext` at launch,
+  and pass each through a `WatchSnapshotGate` seeded with what's on screen.
+- **`startWatchApp` from the phone** reaches the watch app's
+  `handle(_ workoutConfiguration:)`, including while a watch workout is
+  already running (e.g. the watch started it). That handler must do nothing
+  when an `HKWorkoutSession` exists.
+- **HealthKit on the phone.** `WatchBridgePlugin.startWatchApp` calls
+  `HKHealthStore.startWatchApp` for real, but only when a paired watch has
+  the app installed, which can't happen before step 3. It builds and links
+  now (HealthKit autolinks), with no entitlement. Step 3 must add the
+  HealthKit entitlement (and usage strings) to `App` at the same time as the
+  watch target, or `startWatchApp` fails at runtime.
+- **Background wakes.** `WatchConnectivityCoordinator` activates `WCSession`
+  in `AppDelegate`, so taps are queued even when mirroring wakes the app
+  without a WebView. The queue file is written with
+  `completeUntilFirstUserAuthentication` protection so a locked phone can
+  write it.
+- **Native logging.** Rejected or undecodable taps and queue-file recovery
+  go to the unified log (subsystem `com.willchan.workouttracker`, category
+  `WatchBridge`), not the in-app `log()`.
 
 ## Alternatives considered
 

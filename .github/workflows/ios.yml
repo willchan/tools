@@ -152,6 +152,7 @@ jobs:
       # extracted out of the thin App/LiveActivityWidget targets gets real
       # XCTest coverage; see ios/MANUAL_SETUP.md for why those targets
       # themselves have no unit test target of their own.
+      # The same suite also runs on watchOS, in the applogic-watchos job.
       - name: Run AppLogic unit tests
         working-directory: workout-tracker/ios/App/AppLogic
         run: |
@@ -377,6 +378,70 @@ jobs:
             awk -F'\t' '{ total += $2; printf "| %s | %s |\n", $1, $2 }
                         END { printf "| **measured total** | **%d** |\n", total }' "$TIMINGS"
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  applogic-watchos:
+    # AppLogic is shared by the phone app and the watch app (watch protocol
+    # types, the disk queue, snapshot ordering; see
+    # docs/adr/0002-apple-watch-remote.md), so its XCTests run on a watchOS
+    # Simulator as well as the iOS one in simulator-build above. A separate
+    # job because it needs nothing from the web build or the Xcode project:
+    # xcodebuild tests the bare Package.swift, which keeps this job short and
+    # parallel to the others.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: workout-tracker/ios/App/AppLogic
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runner images normally ship a watchOS runtime with each Xcode, but
+      # don't count on it: download one if missing, and create a device if
+      # the runtime has none.
+      - name: Pick a watchOS Simulator
+        id: sim
+        run: |
+          xcodebuild -version
+          find_device() {
+            xcrun simctl list devices available -j | jq -r '
+              .devices | to_entries[] | select(.key | contains("watchOS")) | .value[] | select(.isAvailable) | .udid
+            ' | head -1
+          }
+          find_runtime() {
+            xcrun simctl list runtimes available -j | jq -r '
+              [.runtimes[] | select(.platform == "watchOS")] | last | .identifier // empty
+            '
+          }
+          UDID=$(find_device)
+          if [ -z "$UDID" ]; then
+            RUNTIME=$(find_runtime)
+            if [ -z "$RUNTIME" ]; then
+              echo "::warning::No watchOS Simulator runtime on this runner; downloading one"
+              xcodebuild -downloadPlatform watchOS
+              RUNTIME=$(find_runtime)
+            fi
+            DEVICE_TYPE=$(xcrun simctl list devicetypes -j | jq -r '
+              [.devicetypes[] | select(.productFamily == "Apple Watch")] | last | .identifier // empty
+            ')
+            if [ -n "$RUNTIME" ] && [ -n "$DEVICE_TYPE" ]; then
+              UDID=$(xcrun simctl create "CI Apple Watch" "$DEVICE_TYPE" "$RUNTIME")
+            fi
+          fi
+          if [ -z "$UDID" ]; then
+            echo "::error::No watchOS Simulator available on this runner"
+            xcrun simctl list runtimes
+            exit 1
+          fi
+          xcrun simctl list devices | grep "$UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Run AppLogic unit tests (watchOS)
+        run: |
+          xcodebuild test \
+            -scheme AppLogic \
+            -destination "platform=watchOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skipPackagePluginValidation
 
   ui-test-safe-area:
     # Ground-truth backstop for env(safe-area-inset-*) handling — see

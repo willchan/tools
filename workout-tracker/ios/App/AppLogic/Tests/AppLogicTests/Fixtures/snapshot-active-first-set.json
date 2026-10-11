@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "seq": 1759100000001,
+  "status": "active",
+  "workout": {
+    "dayName": "Squat Day",
+    "setId": "1759100000000/0/squat:0.65:5::",
+    "setNumber": 1,
+    "setTotal": 14,
+    "allSetsDone": false,
+    "exerciseName": "Barbell Squat",
+    "weightLabel": "145 lbs",
+    "plateLabel": "45 + 5 per side",
+    "reps": 5,
+    "maxReps": 5,
+    "isAmrap": false,
+    "isBonus": false,
+    "restEndTime": null,
+    "restLocksDone": false,
+    "restAfterSetSeconds": 120
+  }
+}

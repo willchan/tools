@@ -1,3 +1,5 @@
+// iOS only, like WebViewScrollChrome itself.
+#if os(iOS)
 import XCTest
 @testable import AppLogic
 
@@ -18,3 +20,4 @@ final class WebViewScrollChromeTests: XCTestCase {
         XCTAssertFalse(scrollView.showsHorizontalScrollIndicator)
     }
 }
+#endif

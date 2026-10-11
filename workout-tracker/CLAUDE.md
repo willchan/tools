@@ -65,6 +65,14 @@ Build order, from ADR 0002:
    `src/native/watchBridge.ts` (`WatchBridgePlugin`).
 2. Native `WatchBridge` plugin (`WCSession` + disk queue); Codable protocol
    types and queue logic in `AppLogic` (iOS + watchOS), XCTest on both.
+   **Done.** `AppLogic` has `WatchProtocol.swift` (Codable mirrors,
+   WatchConnectivity payloads), `WatchEventQueue`, `WatchInbox` and
+   `WatchSnapshotGate`. Its JSON fixtures
+   (`AppLogic/Tests/AppLogicTests/Fixtures`) are also checked against the TS
+   by `e2e/watch-protocol.spec.ts`: change the protocol on both sides and
+   regenerate them together. The `App` target has `WatchBridgePlugin`
+   (registered in `MainViewController.capacitorDidLoad`) and
+   `WatchConnectivityCoordinator` (activated in `AppDelegate`).
 3. Watch target via a checked-in `xcodeproj` script: HealthKit workout session
    with mirroring, start-from-either-device, minimal remote UI; entitlements,
    background modes, iOS 17 deployment target, signing.
