@@ -11,6 +11,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // and its taps must reach the disk queue whether or not a WebView
         // ever loads. See WatchConnectivityCoordinator.
         WatchConnectivityCoordinator.shared.activate()
+        WorkoutMirroring.shared.activate()
         return true
     }
 

@@ -90,6 +90,55 @@ test.describe('iOS export compliance', () => {
   });
 });
 
+/**
+ * The Apple Watch app (ios/App/WatchApp, added by
+ * ios/scripts/add-watch-app-target.rb). These settings fail silently when
+ * lost: the build still succeeds, but the watch app won't install with the
+ * phone app, stops running when the screen turns off, or can't start a
+ * HealthKit workout. Only a real watch would notice, so check them here.
+ */
+test.describe('Apple Watch app configuration', () => {
+  async function read(path: string): Promise<string> {
+    const { readFileSync } = await import('node:fs');
+    return readFileSync(new URL(`../ios/App/${path}`, import.meta.url), 'utf8');
+  }
+
+  test('the watch app is embedded in the phone app and paired to its bundle id', async () => {
+    const { default: config } = await import('../capacitor.config');
+    const pbxproj = await read('App.xcodeproj/project.pbxproj');
+    expect(pbxproj).toContain('WatchApp.app in Embed Watch Content');
+    expect(pbxproj).toContain('dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";');
+    expect(pbxproj).toContain(`INFOPLIST_KEY_WKCompanionAppBundleIdentifier = ${config.appId};`);
+    expect(pbxproj).toContain(`PRODUCT_BUNDLE_IDENTIFIER = ${config.appId}.watchkitapp;`);
+  });
+
+  test('the watch app keeps running during a workout', async () => {
+    const plist = await read('WatchApp/Info.plist');
+    expect(plist).toMatch(/<key>WKBackgroundModes<\/key>\s*<array>\s*<string>workout-processing<\/string>/);
+  });
+
+  test('both apps have the HealthKit entitlement and Health purpose strings', async () => {
+    for (const path of ['App/App.entitlements', 'WatchApp/WatchApp.entitlements']) {
+      expect(await read(path), path).toMatch(/<key>com\.apple\.developer\.healthkit<\/key>\s*<true\/>/);
+    }
+    const pbxproj = await read('App.xcodeproj/project.pbxproj');
+    expect(pbxproj).toContain('CODE_SIGN_ENTITLEMENTS = App/App.entitlements;');
+    expect(pbxproj).toContain('CODE_SIGN_ENTITLEMENTS = WatchApp/WatchApp.entitlements;');
+    for (const key of ['NSHealthShareUsageDescription', 'NSHealthUpdateUsageDescription']) {
+      expect(pbxproj).toMatch(new RegExp(`INFOPLIST_KEY_${key} = "[^"]{20,}";`));
+    }
+  });
+
+  // HKHealthStore.workoutSessionMirroringStartHandler, which lets a workout
+  // started on the watch wake the phone app, is iOS 17+.
+  test('the phone app targets iOS 17 for workout mirroring', async () => {
+    const pbxproj = await read('App.xcodeproj/project.pbxproj');
+    const appConfigs = pbxproj.split('INFOPLIST_FILE = App/Info.plist;').length - 1;
+    expect(appConfigs).toBe(2);
+    expect(pbxproj).not.toMatch(/IPHONEOS_DEPLOYMENT_TARGET = 16\./);
+  });
+});
+
 test.describe('Native rest-timer notifications', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {

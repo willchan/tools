@@ -74,14 +74,12 @@ public class WatchBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     /// Launch the watch app into a traditional strength training workout.
     ///
     /// Resolves without doing anything when there's no paired watch with the
-    /// app installed, which is also every build until the watch target and
-    /// its HealthKit entitlement exist (step 3 of ADR 0002), so this never
-    /// reaches HealthKit without them.
+    /// app installed, so a phone without the watch app never reaches HealthKit.
     ///
     /// Harmless when a watch workout is already running: startWatchApp only
     /// brings the watch app forward and hands it this configuration, and the
-    /// watch app's `handle(_ workoutConfiguration:)` must ignore it while it
-    /// has a session (step 3).
+    /// watch app's `handle(_ workoutConfiguration:)` ignores it while it has a
+    /// session (WatchApp/WorkoutSessionController.swift).
     @objc func startWatchApp(_ call: CAPPluginCall) {
         guard coordinator.watchAppAvailable, HKHealthStore.isHealthDataAvailable() else {
             return call.resolve()
@@ -89,11 +87,19 @@ public class WatchBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = .traditionalStrengthTraining
         configuration.locationType = .indoor
-        healthStore.startWatchApp(with: configuration) { _, error in
-            if let error {
-                call.reject("startWatchApp failed: \(error.localizedDescription)", nil, error)
-            } else {
-                call.resolve()
+        // The same access the watch asks for, so the workout it mirrors back
+        // (see WorkoutMirroring) can reach this app. iOS asks only once.
+        let store = healthStore
+        store.requestAuthorization(
+            toShare: [HKObjectType.workoutType()],
+            read: [HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned)]
+        ) { _, _ in
+            store.startWatchApp(with: configuration) { _, error in
+                if let error {
+                    call.reject("startWatchApp failed: \(error.localizedDescription)", nil, error)
+                } else {
+                    call.resolve()
+                }
             }
         }
     }

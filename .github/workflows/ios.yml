@@ -139,6 +139,30 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
           printf 'xcodebuild\t%s\n' "$((SECONDS - t0))" >> "$TIMINGS"
 
+      # The watch app (ios/App/WatchApp) builds as a dependency of App and is
+      # copied into it; check it landed with the keys a real watch needs to
+      # install it alongside the phone app and keep it running mid-workout.
+      # Nothing else in this job would notice if the embed were lost.
+      - name: Check the watch app is embedded
+        working-directory: workout-tracker/ios/App
+        run: |
+          WATCH_PLIST="$APP_PATH/Watch/WatchApp.app/Info.plist"
+          if [ ! -f "$WATCH_PLIST" ]; then
+            echo "::error::$APP_PATH has no Watch/WatchApp.app"
+            ls -la "$APP_PATH" "$APP_PATH/Watch" 2>&1 || true
+            exit 1
+          fi
+          plutil -p "$WATCH_PLIST"
+          check() {
+            if ! plutil -extract "$1" raw -o - "$WATCH_PLIST" | grep -qx "$2"; then
+              echo "::error::WatchApp Info.plist: $1 is not $2"
+              exit 1
+            fi
+          }
+          check CFBundleIdentifier "$APP_ID.watchkitapp"
+          check WKCompanionAppBundleIdentifier "$APP_ID"
+          check WKBackgroundModes.0 workout-processing
+
       - name: Wait for the Simulator to finish booting
         run: |
           t0=$SECONDS

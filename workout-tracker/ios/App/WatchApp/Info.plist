@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged with the keys generated from INFOPLIST_KEY_* build settings
+	     (see ios/scripts/add-watch-app-target.rb). Only keys with no build
+	     setting equivalent live here. workout-processing keeps the app
+	     running, and its rest timer and haptics working, during a workout. -->
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+	</array>
+</dict>
+</plist>
