@@ -78,6 +78,30 @@ exists, `com.willchan.workouttracker.LiveActivityWidget`. Nothing needs to
 be downloaded or added as a secret; `-allowProvisioningUpdates` picks them
 up by bundle ID automatically once they exist.
 
+## 4b. Apple Watch app and HealthKit (one time, before the first build with the watch app)
+
+The watch app (`ios/App/WatchApp`, ADR 0002 step 3) adds a bundle ID, and
+both apps now use HealthKit. App Store Connect rejects an archive whose
+entitlements aren't enabled on its App ID, and enabling a capability
+invalidates the App ID's existing profiles. So, at developer.apple.com →
+Certificates, IDs & Profiles:
+
+1. **Identifiers → +** → App IDs → App → explicit Bundle ID
+   `com.willchan.workouttracker.watchkitapp`, description e.g. "Workout
+   Tracker Watch". Under Capabilities, tick **HealthKit**. Register.
+2. **Identifiers → `com.willchan.workouttracker`** → tick **HealthKit** →
+   Save (confirm the warning that profiles will need regenerating).
+3. **Profiles**: for `com.willchan.workouttracker`, open its App Store
+   profile → Edit → Save (regenerates it with HealthKit). Then **+** →
+   App Store → `com.willchan.workouttracker.watchkitapp` → the Apple
+   Distribution certificate → Generate. The widget's profile is
+   unaffected.
+
+Nothing to download or add as a secret, as in step 4. If an archive fails
+with "Provisioning profile … doesn't include the HealthKit capability" or
+"No profiles for 'com.willchan.workouttracker.watchkitapp' were found",
+one of these steps is missing.
+
 ## 5. Add repo secrets
 
 GitHub → this repo → Settings → Secrets and variables → Actions → New

@@ -1,7 +1,8 @@
 # 0002. Apple Watch companion as a thin remote
 
-- **Status:** Accepted, 2026-09. Steps 1 (TS) and 2 (native `WatchBridge`,
-  `AppLogic` on iOS + watchOS) are implemented. Steps 3–4 are pending.
+- **Status:** Accepted, 2026-09. Steps 1 (TS), 2 (native `WatchBridge`,
+  `AppLogic` on iOS + watchOS) and 3 (the watch app) are implemented. Step 4
+  (a real workout) is pending.
 - **Related:** [0001](0001-web-first-with-capacitor-shell.md)
 
 ## Context
@@ -146,3 +147,27 @@ What the phone side now expects from the watch app:
   templates, working without the phone): the thin-remote model no longer fits.
 - **The app leaves the web-first repo:** consider going native in its own
   repo, which removes the WebView as the brain.
+
+### Step 3 notes, for step 4
+
+- **Before the first TestFlight build with the watch app**, do the portal
+  steps in `ios/TESTFLIGHT_SETUP.md` ("4b"): register the watch App ID,
+  enable HealthKit on both App IDs, regenerate the profiles. Until then the
+  TestFlight archive fails at signing.
+- **What the watch decides locally**, all from the snapshot: after Done it
+  counts down `restAfterSetSeconds` from the tap time, skip and ±15s move
+  the rest it shows, and every action is disabled until the phone answers.
+  After 5 s unanswered it shows "Waiting for iPhone…" (`WatchRemoteState`).
+- **Start from the watch**: Start begins the watch's `HKWorkoutSession`,
+  mirrors it to the phone (which wakes the app through `WorkoutMirroring`)
+  and sends a `start` tap. **Start from the phone**: `startWatchApp` lands
+  in the watch app's `handle(_:)`, which starts the session unless one is
+  running. The watch session ends when the phone's snapshot goes idle;
+  "End Watch Workout" ends it alone if the phone can't.
+- **First run asks for Health access twice**: on the phone the first time a
+  workout opens with the watch app installed, and on the watch at its first
+  workout.
+- **What to look at in step 4**: the per-tap `watch event` log lines
+  (`queueMs`, `tapToApplyMs`) with the phone locked, how often the watch
+  shows "Waiting for iPhone…", and whether a watch-started workout opens on
+  the phone without unlocking it.

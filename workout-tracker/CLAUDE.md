@@ -75,7 +75,12 @@ Build order, from ADR 0002:
    `WatchConnectivityCoordinator` (activated in `AppDelegate`).
 3. Watch target via a checked-in `xcodeproj` script: HealthKit workout session
    with mirroring, start-from-either-device, minimal remote UI; entitlements,
-   background modes, iOS 17 deployment target, signing.
+   background modes, iOS 17 deployment target, signing. **Done**, pending the
+   one-time portal steps in `ios/TESTFLIGHT_SETUP.md` ("4b") before its first
+   TestFlight build. `ios/App/WatchApp` is SwiftUI/WatchConnectivity/HealthKit
+   glue over AppLogic's `WatchRemoteState`, `WatchTap` and `RestEndAlarm`;
+   `ios/scripts/add-watch-app-target.rb` added the target. On the phone,
+   `WorkoutMirroring` lets a watch-started workout wake the app.
 4. TestFlight build and one real workout to read the latency logs.
 
 ## Commands
