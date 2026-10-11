@@ -446,6 +446,52 @@ test.describe('Native data export', () => {
 
     await expect(page.locator('#export-btn')).toHaveText('Export Failed');
   });
+
+  // Export Logs used to only build a browser <a download> link, which does
+  // nothing inside the WKWebView shell, so tapping it on iOS was a silent
+  // no-op. It has to take the same Filesystem + share sheet path as data.
+  test('log export also writes a file and opens the native share sheet', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
+      (window as unknown as { __shareCalls: unknown[] }).__shareCalls = [];
+      (window.navigator as unknown as { share: (data: unknown) => Promise<void> }).share = async (data: unknown) => {
+        (window as unknown as { __shareCalls: unknown[] }).__shareCalls.push(data);
+      };
+    });
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.click('.nav-btn[data-route="settings"]');
+    await page.waitForSelector('.settings-screen');
+
+    await page.click('#export-logs-btn');
+
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __shareCalls: unknown[] }).__shareCalls.length))
+      .toBeGreaterThan(0);
+    const [call] = await page.evaluate(
+      () => (window as unknown as { __shareCalls: { title: string; url: string }[] }).__shareCalls,
+    );
+    expect(call.title).toMatch(/^workout-logs-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(call.url).toBeTruthy();
+    await expect(page.locator('#export-logs-btn')).toHaveText('Export Logs (JSON)');
+  });
+
+  test('a log export failure surfaces "Export Failed"', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
+      (window.navigator as unknown as { share: (data: unknown) => Promise<void> }).share = async () => {
+        throw new Error('share sheet unavailable');
+      };
+    });
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    await page.click('.nav-btn[data-route="settings"]');
+    await page.waitForSelector('.settings-screen');
+
+    await page.click('#export-logs-btn');
+
+    await expect(page.locator('#export-logs-btn')).toHaveText('Export Failed');
+  });
 });
 
 test.describe('Native OTA update check', () => {

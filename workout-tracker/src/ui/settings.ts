@@ -248,52 +248,64 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     await log(granted ? 'info' : 'warn', `notification permission ${granted ? 'granted' : 'denied'}`);
   });
 
-  document.getElementById('export-btn')?.addEventListener('click', async () => {
-    const data = await exportAll();
-    const json = JSON.stringify(data, null, 2);
-    const filename = `workout-data-${new Date().toISOString().split('T')[0]}.json`;
-    const exportBtn = document.getElementById('export-btn') as HTMLButtonElement;
-
-    try {
-      if (isNativePlatform()) {
-        // A browser <a download> blob produces no usable file inside a
-        // Capacitor WKWebView shell (no download manager/chrome), so write the
-        // file to disk and hand it to the native share sheet instead — AirDrop
-        // to another device, Files app, Messages, etc.
-        const [{ Filesystem, Directory, Encoding }, { Share }] = await Promise.all([
-          import('@capacitor/filesystem'),
-          import('@capacitor/share'),
-        ]);
-        const { uri } = await Filesystem.writeFile({
-          path: filename,
-          data: json,
-          directory: Directory.Cache,
-          encoding: Encoding.UTF8,
-        });
-        await Share.share({ title: filename, url: uri, files: [uri] });
-      } else {
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-      await log('info', 'data exported');
-    } catch (err) {
-      // A user cancelling the native share sheet resolves rather than
-      // rejects, so anything reaching here is a genuine failure (e.g. no
-      // navigator.share on web, or a native Filesystem/Share error).
-      await log('warn', `data export failed: ${err instanceof Error ? err.message : String(err)}`);
-      exportBtn.textContent = 'Export Failed';
-      setTimeout(() => {
-        exportBtn.textContent = 'Export Data (JSON)';
-      }, 1500);
+  // Both exports hand a JSON file to the user the same way. On native, a
+  // browser <a download> blob produces no usable file inside a Capacitor
+  // WKWebView shell (no download manager/chrome), so the file is written to
+  // disk and handed to the native share sheet instead: AirDrop to another
+  // device, Files app, Messages, etc.
+  async function saveJsonFile(filename: string, json: string): Promise<void> {
+    if (isNativePlatform()) {
+      const [{ Filesystem, Directory, Encoding }, { Share }] = await Promise.all([
+        import('@capacitor/filesystem'),
+        import('@capacitor/share'),
+      ]);
+      const { uri } = await Filesystem.writeFile({
+        path: filename,
+        data: json,
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8,
+      });
+      await Share.share({ title: filename, url: uri, files: [uri] });
+    } else {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
     }
-  });
+  }
 
-  document.getElementById('export-logs-btn')?.addEventListener('click', async () => {
+  function wireExportButton(btnId: string, what: string, build: () => Promise<{ filename: string; json: string }>) {
+    const btn = document.getElementById(btnId) as HTMLButtonElement | null;
+    const label = btn?.textContent ?? '';
+    btn?.addEventListener('click', async () => {
+      try {
+        const { filename, json } = await build();
+        await saveJsonFile(filename, json);
+        await log('info', `${what} exported`);
+      } catch (err) {
+        // A user cancelling the native share sheet resolves rather than
+        // rejects, so anything reaching here is a genuine failure (e.g. no
+        // navigator.share on web, or a native Filesystem/Share error).
+        await log('warn', `${what} export failed: ${err instanceof Error ? err.message : String(err)}`);
+        btn.textContent = 'Export Failed';
+        setTimeout(() => {
+          btn.textContent = label;
+        }, 1500);
+      }
+    });
+  }
+
+  const today = () => new Date().toISOString().split('T')[0];
+
+  wireExportButton('export-btn', 'data', async () => ({
+    filename: `workout-data-${today()}.json`,
+    json: JSON.stringify(await exportAll(), null, 2),
+  }));
+
+  wireExportButton('export-logs-btn', 'logs', async () => {
     const entries = await getAllLogs();
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -302,13 +314,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
       userAgent: navigator.userAgent,
       entries,
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `workout-logs-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return { filename: `workout-logs-${today()}.json`, json: JSON.stringify(payload, null, 2) };
   });
 
   document.getElementById('clear-logs-btn')?.addEventListener('click', async () => {
