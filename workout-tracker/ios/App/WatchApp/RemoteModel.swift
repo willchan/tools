@@ -11,8 +11,6 @@ final class RemoteModel: ObservableObject {
     static let shared = RemoteModel()
 
     @Published private(set) var display: WatchDisplay = .idle(awaitingPhone: false, waitingForPhone: false)
-    /// The rep picker, reset to the prescription for each new set.
-    @Published var reps = 0
 
     let workout = WorkoutSessionController()
 
@@ -20,7 +18,6 @@ final class RemoteModel: ObservableObject {
     private var state = WatchRemoteState()
     private var alarm = RestEndAlarm()
     private var ticker: Timer?
-    private var repsSetId: String?
     private var activated = false
 
     func activate() {
@@ -50,10 +47,6 @@ final class RemoteModel: ObservableObject {
         let now = Date().timeIntervalSince1970 * 1000
         display = state.display(now: now)
         guard case .active(let active) = display else { return }
-        if repsSetId != active.workout.setId {
-            repsSetId = active.workout.setId
-            reps = active.workout.reps
-        }
         if alarm.shouldFire(restEnd: active.restEndTime, now: now) {
             WKInterfaceDevice.current().play(.notification)
         }
@@ -82,9 +75,24 @@ final class RemoteModel: ObservableObject {
         Task { await workout.start(with: configuration) }
     }
 
+    /// The big button: whatever WatchRemoteState says it is right now.
+    func primary() {
+        guard let active = current, active.primaryEnabled else { return }
+        switch active.primaryAction {
+        case .done: completeSet()
+        case .skipRest: skipRest()
+        case .finish: finish()
+        }
+    }
+
+    func changeReps(by delta: Int) {
+        state.adjustReps(by: delta)
+        refresh()
+    }
+
     func completeSet() {
         guard let active = current, active.doneEnabled else { return }
-        send(WatchTap.completeSet(setId: active.workout.setId, reps: reps))
+        send(WatchTap.completeSet(setId: active.workout.setId, reps: active.reps))
     }
 
     func skipRest() {

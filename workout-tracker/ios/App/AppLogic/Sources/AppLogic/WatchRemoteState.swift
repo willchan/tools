@@ -17,6 +17,9 @@ public struct WatchRemoteState: Sendable {
     public private(set) var snapshot: WatchSnapshot?
     private var gate: WatchSnapshotGate
     private var pending: WatchEvent?
+    /// Reps chosen on the watch, and the set they were chosen for. Any other
+    /// set shows its own prescription, so a choice never carries over.
+    private var chosenReps: (setId: String, reps: Int)?
 
     public init(lastSnapshot: WatchSnapshot? = nil) {
         snapshot = lastSnapshot
@@ -39,6 +42,19 @@ public struct WatchRemoteState: Sendable {
         return true
     }
 
+    /// Change the reps the watch will report for the current set, within
+    /// 0...maxReps.
+    public mutating func adjustReps(by delta: Int) {
+        guard let workout = snapshot?.workout, snapshot?.status == .active else { return }
+        let current = reps(for: workout)
+        chosenReps = (workout.setId, min(max(current + delta, 0), max(workout.maxReps, 0)))
+    }
+
+    private func reps(for workout: WatchWorkoutView) -> Int {
+        if let chosenReps, chosenReps.setId == workout.setId { return chosenReps.reps }
+        return workout.reps
+    }
+
     /// A tap was just sent to the phone.
     public mutating func record(_ event: WatchEvent) {
         pending = event
@@ -56,13 +72,20 @@ public struct WatchRemoteState: Sendable {
         let resting = restEnd.map { now < $0 } ?? false
         let phoneLocksDone = workout.restLocksDone && (workout.restEndTime.map { now < $0 } ?? false)
 
+        let doneEnabled = !awaiting && !workout.allSetsDone && !phoneLocksDone
+        let primary: WatchPrimaryAction =
+            workout.allSetsDone ? .finish : (phoneLocksDone && resting ? .skipRest : .done)
+
         return .active(ActiveWatchDisplay(
             workout: workout,
+            reps: reps(for: workout),
             restEndTime: restEnd,
             restRemainingSeconds: resting ? Int((((restEnd ?? now) - now) / 1000).rounded(.up)) : nil,
-            doneEnabled: !awaiting && !workout.allSetsDone && !phoneLocksDone,
+            doneEnabled: doneEnabled,
             awaitingPhone: awaiting,
-            waitingForPhone: waiting))
+            waitingForPhone: waiting,
+            primaryAction: primary,
+            primaryEnabled: primary == .done ? doneEnabled : !awaiting))
     }
 
     private func effectiveRestEnd(_ workout: WatchWorkoutView) -> Double? {
@@ -88,6 +111,9 @@ public enum WatchDisplay: Equatable, Sendable {
 
 public struct ActiveWatchDisplay: Equatable, Sendable {
     public let workout: WatchWorkoutView
+    /// Reps Done will report: the prescription, or what was chosen on the
+    /// watch for this set.
+    public let reps: Int
     /// Epoch ms the rest shown ends (the phone's, or the local guess).
     public let restEndTime: Double?
     /// Whole seconds left, rounded up; nil when not resting.
@@ -97,6 +123,19 @@ public struct ActiveWatchDisplay: Equatable, Sendable {
     public let awaitingPhone: Bool
     /// ...and has been for long enough to tell the user.
     public let waitingForPhone: Bool
+    /// The watch's one big button.
+    public let primaryAction: WatchPrimaryAction
+    public let primaryEnabled: Bool
+}
+
+/// The single primary button the watch shows for the current moment.
+public enum WatchPrimaryAction: Equatable, Sendable {
+    /// Complete the current set with the chosen reps.
+    case done
+    /// The phone's rest locks Done until it ends: offer to skip it instead.
+    case skipRest
+    /// Every set is done.
+    case finish
 }
 
 /// Builds the taps the watch sends. Each gets a fresh idempotency id and the
