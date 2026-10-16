@@ -55,6 +55,18 @@ public struct WatchRemoteState: Sendable {
         return workout.reps
     }
 
+    /// The tap the big button sends right now, built from exactly what the
+    /// display shows (including its reps), or nil when it's disabled.
+    public func primaryTap(now: Double, id: String = UUID().uuidString) -> WatchEvent? {
+        guard case .active(let active) = display(now: now), active.primaryEnabled else { return nil }
+        let setId = active.workout.setId
+        switch active.primaryAction {
+        case .done: return WatchTap.completeSet(setId: setId, reps: active.reps, at: now, id: id)
+        case .skipRest: return WatchTap.skipRest(setId: setId, at: now, id: id)
+        case .finish: return WatchTap.finish(setId: setId, at: now, id: id)
+        }
+    }
+
     /// A tap was just sent to the phone.
     public mutating func record(_ event: WatchEvent) {
         pending = event

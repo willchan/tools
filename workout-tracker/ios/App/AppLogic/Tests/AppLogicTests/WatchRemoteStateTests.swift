@@ -329,4 +329,40 @@ final class WatchRemoteStateTests: XCTestCase {
         state.adjustReps(by: 1)
         XCTAssertEqual(state.display(now: t0), .idle(awaitingPhone: false, waitingForPhone: false))
     }
+
+    // MARK: - The tap the big button sends
+
+    /// From the first real workout: Done reported the previous value (6)
+    /// while the watch showed the one just chosen (10). The tap is built
+    /// from exactly what the display shows.
+    func testDoneSendsExactlyTheRepsOnScreen() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(setId: "rows", restAfterSetSeconds: nil)))
+        state.adjustReps(by: -4)
+        state.adjustReps(by: 4)
+        state.adjustReps(by: -1)
+        let shown = try activeDisplay(state, now: t0).reps
+        let tap = try XCTUnwrap(state.primaryTap(now: t0, id: "t"))
+        XCTAssertEqual(tap, WatchEvent(id: "t", at: t0, type: .completeSet, setId: "rows", reps: shown))
+        XCTAssertEqual(tap.reps, 4)
+    }
+
+    func testThePrimaryTapMatchesThePrimaryAction() throws {
+        var resting = WatchRemoteState()
+        resting.receive(active(1, workout(restEndTime: t0 + 90_000, restLocksDone: true)))
+        XCTAssertEqual(resting.primaryTap(now: t0, id: "s"),
+                       WatchEvent(id: "s", at: t0, type: .skipRest, setId: "w/0/squat"))
+
+        var done = WatchRemoteState()
+        done.receive(active(1, workout(setId: "end", allSetsDone: true)))
+        XCTAssertEqual(done.primaryTap(now: t0, id: "f"), WatchEvent(id: "f", at: t0, type: .finish, setId: "end"))
+    }
+
+    func testNoPrimaryTapWhileDisabledOrIdle() {
+        var state = WatchRemoteState()
+        XCTAssertNil(state.primaryTap(now: t0))
+        state.receive(active(1, workout()))
+        state.record(WatchTap.completeSet(setId: "w/0/squat", reps: 5, at: t0, id: "a"))
+        XCTAssertNil(state.primaryTap(now: t0 + 1_000), "a tap is already unanswered")
+    }
 }

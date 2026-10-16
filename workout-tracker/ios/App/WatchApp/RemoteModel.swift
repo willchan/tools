@@ -77,22 +77,14 @@ final class RemoteModel: ObservableObject {
 
     /// The big button: whatever WatchRemoteState says it is right now.
     func primary() {
-        guard let active = current, active.primaryEnabled else { return }
-        switch active.primaryAction {
-        case .done: completeSet()
-        case .skipRest: skipRest()
-        case .finish: finish()
-        }
+        let now = (Date().timeIntervalSince1970 * 1000).rounded()
+        guard let tap = state.primaryTap(now: now) else { return }
+        send(tap)
     }
 
     func changeReps(by delta: Int) {
         state.adjustReps(by: delta)
         refresh()
-    }
-
-    func completeSet() {
-        guard let active = current, active.doneEnabled else { return }
-        send(WatchTap.completeSet(setId: active.workout.setId, reps: active.reps))
     }
 
     func skipRest() {
@@ -103,11 +95,6 @@ final class RemoteModel: ObservableObject {
     func adjustRest(by seconds: Double) {
         guard let active = current, active.restEndTime != nil else { return }
         send(WatchTap.adjustRest(setId: active.workout.setId, deltaSeconds: seconds))
-    }
-
-    func finish() {
-        guard let active = current, active.workout.allSetsDone else { return }
-        send(WatchTap.finish(setId: active.workout.setId))
     }
 
     /// Ends only the watch's HealthKit workout, for when the phone can't
