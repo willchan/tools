@@ -13,6 +13,7 @@ import {
 import type { ProgressionState } from '../db/types';
 import { navigate, type Route } from './router';
 import { requestNotificationPermission } from './notifications';
+import { shareOptionsForFile } from '../native/shareFile';
 import { isNativePlatform } from '../native/platform';
 import {
   getAllLogs,
@@ -265,7 +266,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
         directory: Directory.Cache,
         encoding: Encoding.UTF8,
       });
-      await Share.share({ title: filename, url: uri, files: [uri] });
+      await Share.share(shareOptionsForFile(uri, filename));
     } else {
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
