@@ -201,4 +201,168 @@ final class WatchRemoteStateTests: XCTestCase {
         state.receive(idle(2))
         XCTAssertFalse(state.isActive)
     }
+
+    // MARK: - The one big button
+
+    /// The watch shows a single primary button, so which one it is matters:
+    /// Done normally, Skip Rest while the phone's rest locks Done, Finish once
+    /// every set is done. Disabled while a tap is unanswered.
+    func testPrimaryActionIsDoneNormally() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout()))
+        let display = try activeDisplay(state, now: t0)
+        XCTAssertEqual(display.primaryAction, .done)
+        XCTAssertTrue(display.primaryEnabled)
+    }
+
+    func testPrimaryActionIsSkipRestWhileRestLocksDone() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(restEndTime: t0 + 90_000, restLocksDone: true)))
+        let resting = try activeDisplay(state, now: t0 + 1_000)
+        XCTAssertEqual(resting.primaryAction, .skipRest)
+        XCTAssertTrue(resting.primaryEnabled)
+
+        // Rest over: back to Done.
+        XCTAssertEqual(try activeDisplay(state, now: t0 + 90_000).primaryAction, .done)
+    }
+
+    /// An accessory during a main set's rest: Done stays the button, and the
+    /// rest is only shown alongside.
+    func testPrimaryActionStaysDoneDuringRestThatDoesNotLockDone() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(restEndTime: t0 + 90_000, restLocksDone: false)))
+        let display = try activeDisplay(state, now: t0 + 1_000)
+        XCTAssertEqual(display.primaryAction, .done)
+        XCTAssertTrue(display.primaryEnabled)
+        XCTAssertNotNil(display.restRemainingSeconds)
+    }
+
+    func testPrimaryActionIsFinishOnceEverySetIsDone() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(allSetsDone: true)))
+        let display = try activeDisplay(state, now: t0)
+        XCTAssertEqual(display.primaryAction, .finish)
+        XCTAssertTrue(display.primaryEnabled)
+    }
+
+    func testPrimaryActionIsDisabledWhileATapIsUnanswered() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(restEndTime: t0 + 90_000, restLocksDone: true)))
+        state.record(WatchTap.skipRest(setId: "w/0/squat", at: t0 + 1_000, id: "s"))
+        let display = try activeDisplay(state, now: t0 + 2_000)
+        XCTAssertFalse(display.primaryEnabled)
+
+        var finishing = WatchRemoteState()
+        finishing.receive(active(1, workout(allSetsDone: true)))
+        finishing.record(WatchTap.finish(setId: "w/0/squat", at: t0, id: "f"))
+        let finish = try activeDisplay(finishing, now: t0 + 1_000)
+        XCTAssertEqual(finish.primaryAction, .finish)
+        XCTAssertFalse(finish.primaryEnabled)
+    }
+
+    /// Right after Done, the local rest guess is showing but the next set's
+    /// lock isn't known yet: Done, disabled, until the phone answers.
+    func testPrimaryActionAfterCompletingASetWaitsForThePhone() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(restAfterSetSeconds: 90)))
+        state.record(WatchTap.completeSet(setId: "w/0/squat", reps: 5, at: t0, id: "a"))
+        let display = try activeDisplay(state, now: t0 + 1_000)
+        XCTAssertEqual(display.primaryAction, .done)
+        XCTAssertFalse(display.primaryEnabled)
+    }
+
+    // MARK: - Reps
+
+    func testRepsDefaultToThePrescription() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout()))
+        XCTAssertEqual(try activeDisplay(state, now: t0).reps, 5)
+    }
+
+    func testAdjustingRepsStaysWithinTheSet() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout()))
+        state.adjustReps(by: -2)
+        XCTAssertEqual(try activeDisplay(state, now: t0).reps, 3)
+        state.adjustReps(by: 10)
+        XCTAssertEqual(try activeDisplay(state, now: t0).reps, 5, "no more than maxReps")
+        state.adjustReps(by: -10)
+        XCTAssertEqual(try activeDisplay(state, now: t0).reps, 0, "no fewer than 0")
+    }
+
+    /// The bug from the first real workout: the reps entered for a bench
+    /// AMRAP (6) showed up as the default for the next set, dumbbell rows
+    /// (prescribed 10). A new set always starts from its own prescription.
+    func testANewSetStartsFromItsOwnPrescriptionNotThePreviousSetsReps() throws {
+        var state = WatchRemoteState()
+        let amrap = WatchWorkoutView(
+            dayName: "Bench Day", setId: "w/4/bench:0.9:3:amrap:", setNumber: 5, setTotal: 13,
+            allSetsDone: false, exerciseName: "Barbell Bench Press", weightLabel: "140 lbs",
+            plateLabel: "45 + 2.5 per side", reps: 3, maxReps: 999, isAmrap: true, isBonus: false,
+            restEndTime: nil, restLocksDone: false, restAfterSetSeconds: 120)
+        state.receive(active(1, amrap))
+        state.adjustReps(by: 3)
+        XCTAssertEqual(try activeDisplay(state, now: t0).reps, 6)
+        state.record(WatchTap.completeSet(setId: amrap.setId, reps: 6, at: t0, id: "amrap"))
+
+        let rows = WatchWorkoutView(
+            dayName: "Bench Day", setId: "w/5/db-row:na:10::", setNumber: 6, setTotal: 13,
+            allSetsDone: false, exerciseName: "Dumbbell Row", weightLabel: "BW / Custom",
+            plateLabel: nil, reps: 10, maxReps: 10, isAmrap: false, isBonus: false,
+            restEndTime: t0 + 120_000, restLocksDone: false, restAfterSetSeconds: nil)
+        state.receive(active(2, rows))
+        XCTAssertEqual(try activeDisplay(state, now: t0 + 1_000).reps, 10)
+    }
+
+    /// A snapshot for the same set (e.g. after adjusting rest) keeps the
+    /// reps already chosen for it.
+    func testChosenRepsSurviveANewSnapshotForTheSameSet() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(restEndTime: t0 + 90_000)))
+        state.adjustReps(by: -1)
+        state.receive(active(2, workout(restEndTime: t0 + 105_000)))
+        XCTAssertEqual(try activeDisplay(state, now: t0).reps, 4)
+    }
+
+    func testAdjustingRepsWithNoWorkoutDoesNothing() {
+        var state = WatchRemoteState()
+        state.adjustReps(by: 1)
+        XCTAssertEqual(state.display(now: t0), .idle(awaitingPhone: false, waitingForPhone: false))
+    }
+
+    // MARK: - The tap the big button sends
+
+    /// From the first real workout: Done reported the previous value (6)
+    /// while the watch showed the one just chosen (10). The tap is built
+    /// from exactly what the display shows.
+    func testDoneSendsExactlyTheRepsOnScreen() throws {
+        var state = WatchRemoteState()
+        state.receive(active(1, workout(setId: "rows", restAfterSetSeconds: nil)))
+        state.adjustReps(by: -4)
+        state.adjustReps(by: 4)
+        state.adjustReps(by: -1)
+        let shown = try activeDisplay(state, now: t0).reps
+        let tap = try XCTUnwrap(state.primaryTap(now: t0, id: "t"))
+        XCTAssertEqual(tap, WatchEvent(id: "t", at: t0, type: .completeSet, setId: "rows", reps: shown))
+        XCTAssertEqual(tap.reps, 4)
+    }
+
+    func testThePrimaryTapMatchesThePrimaryAction() throws {
+        var resting = WatchRemoteState()
+        resting.receive(active(1, workout(restEndTime: t0 + 90_000, restLocksDone: true)))
+        XCTAssertEqual(resting.primaryTap(now: t0, id: "s"),
+                       WatchEvent(id: "s", at: t0, type: .skipRest, setId: "w/0/squat"))
+
+        var done = WatchRemoteState()
+        done.receive(active(1, workout(setId: "end", allSetsDone: true)))
+        XCTAssertEqual(done.primaryTap(now: t0, id: "f"), WatchEvent(id: "f", at: t0, type: .finish, setId: "end"))
+    }
+
+    func testNoPrimaryTapWhileDisabledOrIdle() {
+        var state = WatchRemoteState()
+        XCTAssertNil(state.primaryTap(now: t0))
+        state.receive(active(1, workout()))
+        state.record(WatchTap.completeSet(setId: "w/0/squat", reps: 5, at: t0, id: "a"))
+        XCTAssertNil(state.primaryTap(now: t0 + 1_000), "a tap is already unanswered")
+    }
 }

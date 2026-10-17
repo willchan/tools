@@ -11,8 +11,6 @@ final class RemoteModel: ObservableObject {
     static let shared = RemoteModel()
 
     @Published private(set) var display: WatchDisplay = .idle(awaitingPhone: false, waitingForPhone: false)
-    /// The rep picker, reset to the prescription for each new set.
-    @Published var reps = 0
 
     let workout = WorkoutSessionController()
 
@@ -20,7 +18,6 @@ final class RemoteModel: ObservableObject {
     private var state = WatchRemoteState()
     private var alarm = RestEndAlarm()
     private var ticker: Timer?
-    private var repsSetId: String?
     private var activated = false
 
     func activate() {
@@ -50,10 +47,6 @@ final class RemoteModel: ObservableObject {
         let now = Date().timeIntervalSince1970 * 1000
         display = state.display(now: now)
         guard case .active(let active) = display else { return }
-        if repsSetId != active.workout.setId {
-            repsSetId = active.workout.setId
-            reps = active.workout.reps
-        }
         if alarm.shouldFire(restEnd: active.restEndTime, now: now) {
             WKInterfaceDevice.current().play(.notification)
         }
@@ -82,9 +75,16 @@ final class RemoteModel: ObservableObject {
         Task { await workout.start(with: configuration) }
     }
 
-    func completeSet() {
-        guard let active = current, active.doneEnabled else { return }
-        send(WatchTap.completeSet(setId: active.workout.setId, reps: reps))
+    /// The big button: whatever WatchRemoteState says it is right now.
+    func primary() {
+        let now = (Date().timeIntervalSince1970 * 1000).rounded()
+        guard let tap = state.primaryTap(now: now) else { return }
+        send(tap)
+    }
+
+    func changeReps(by delta: Int) {
+        state.adjustReps(by: delta)
+        refresh()
     }
 
     func skipRest() {
@@ -95,11 +95,6 @@ final class RemoteModel: ObservableObject {
     func adjustRest(by seconds: Double) {
         guard let active = current, active.restEndTime != nil else { return }
         send(WatchTap.adjustRest(setId: active.workout.setId, deltaSeconds: seconds))
-    }
-
-    func finish() {
-        guard let active = current, active.workout.allSetsDone else { return }
-        send(WatchTap.finish(setId: active.workout.setId))
     }
 
     /// Ends only the watch's HealthKit workout, for when the phone can't
