@@ -67,7 +67,12 @@ export function installGlobalErrorHandlers(): void {
           ? reason
           : safeStringify(reason);
     const stack = reason instanceof Error ? reason.stack : undefined;
-    void log('error', `Unhandled rejection: ${message}`, undefined, stack).catch(() => {});
+    // idb rejects every transaction's `done` promise when it aborts, and
+    // nothing awaits it for reads, so each IndexedDB transaction iOS aborts
+    // around a suspend adds one of these. The request that failed reports
+    // itself; this duplicate is a warning, not a badge-worthy error.
+    const level = isAbortError(reason) ? 'warn' : 'error';
+    void log(level, `Unhandled rejection: ${message}`, undefined, stack).catch(() => {});
   });
 
   document.addEventListener('visibilitychange', () => {
@@ -76,6 +81,10 @@ export function installGlobalErrorHandlers(): void {
       void pruneOldLogs().catch(() => {});
     }
   });
+}
+
+function isAbortError(reason: unknown): boolean {
+  return typeof DOMException !== 'undefined' && reason instanceof DOMException && reason.name === 'AbortError';
 }
 
 function safeStringify(value: unknown): string {

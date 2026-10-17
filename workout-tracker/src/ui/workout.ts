@@ -46,6 +46,35 @@ let isResting = false;
 // stack handlers referencing stale, detached DOM.
 let removeVisibilityReconcileHandler: (() => void) | null = null;
 
+/**
+ * The rest timer as a poll sees it, or undefined when the read failed. When
+ * iOS suspends the app, IndexedDB reads in flight fail on resume ("without
+ * an in-progress transaction"); the next tick just reads again.
+ */
+async function readTimerForPoll(): Promise<TimerState | null | undefined> {
+  try {
+    return await getTimerState();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Runs an async interval tick only when the previous one has finished, so a
+ * stalled database (e.g. while iOS has the app suspended) doesn't queue up a
+ * read every 250ms that all fail together on resume.
+ */
+function nonOverlapping(tick: () => Promise<void>): () => void {
+  let running = false;
+  return () => {
+    if (running) return;
+    running = true;
+    void tick().finally(() => {
+      running = false;
+    });
+  };
+}
+
 /** Does a persisted active-workout record belong to this exact position? */
 function activeWorkoutMatches(activeWorkout: ActiveWorkout, state: ProgressionState): boolean {
   return (
@@ -845,10 +874,11 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
 
     let timerCompleting = false;
 
-    const updateTimer = async () => {
+    const updateTimer = nonOverlapping(async () => {
       if (timerCompleting) return;
 
-      const savedTimer = await getTimerState();
+      const savedTimer = await readTimerForPoll();
+      if (savedTimer === undefined) return;
       if (!savedTimer) {
         timerEl.classList.add('hidden');
         return;
@@ -864,7 +894,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
         timerCompleting = true;
         await handleTimerExpiry(true);
       }
-    };
+    });
 
     timerInterval = setInterval(updateTimer, 250);
     updateTimer();
@@ -1055,7 +1085,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
   const onVisibilityReconcile = () => {
     if (document.visibilityState !== 'visible') return;
     void (async () => {
-      const saved = await getTimerState();
+      const saved = await readTimerForPoll();
       if (!saved || getRemainingMs(saved) > 0) return;
       await handleTimerExpiry(true);
     })();
@@ -1085,9 +1115,10 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
       // killing the live detector.
       if (timerInterval) clearInterval(timerInterval);
       let recoveryCompleting = false;
-      timerInterval = setInterval(async () => {
+      timerInterval = setInterval(nonOverlapping(async () => {
         if (recoveryCompleting) return;
-        const saved = await getTimerState();
+        const saved = await readTimerForPoll();
+        if (saved === undefined) return;
         if (!saved) {
           timerEl.classList.add('hidden');
           setDoneButtonDisabled(false);
@@ -1100,7 +1131,7 @@ export async function renderWorkout(container: HTMLElement): Promise<void> {
           recoveryCompleting = true;
           await handleTimerExpiry(true);
         }
-      }, 250);
+      }), 250);
     } else {
       await handleTimerExpiry(false);
     }

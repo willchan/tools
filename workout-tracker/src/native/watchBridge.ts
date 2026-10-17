@@ -9,6 +9,28 @@ export interface ReceivedWatchEvent extends WatchEvent {
 }
 
 /**
+ * One measurement from the background-tap experiment: the native side ran a
+ * watch tap through the reducer bundle in JavaScriptCore and timed it (see
+ * WatchProbeRecord in ios/App/AppLogic). Times are epoch ms.
+ */
+export interface WatchProbeResult {
+  eventId: string;
+  /** The WatchConnectivity channel that brought the tap first. */
+  channel: string;
+  tapAt: number;
+  receivedAt: number;
+  computedAt: number;
+  repliedAt: number;
+  /** The bundle was loaded for this tap. */
+  coldStart: boolean;
+  verdict?: string;
+  error?: string;
+  appState?: string;
+  /** Seconds; absent in the foreground. */
+  backgroundTimeRemaining?: number;
+}
+
+/**
  * Our own Capacitor plugin bridging to the Apple Watch app (see
  * docs/adr/0002-apple-watch-remote.md). The native side (step 2) wraps
  * WCSession: it writes each incoming tap to a disk queue *before* acking
@@ -27,6 +49,11 @@ export interface WatchBridgePlugin {
   ackEvent(options: { id: string }): Promise<void>;
   /** Launch the watch app into a workout (HKHealthStore.startWatchApp). */
   startWatchApp(): Promise<void>;
+  /**
+   * Background-tap experiment measurements since the last call. Rejects
+   * with code UNIMPLEMENTED on app binaries built before it.
+   */
+  drainProbeResults(): Promise<{ results: WatchProbeResult[] }>;
   addListener(
     eventName: 'watchEvent',
     listener: (event: ReceivedWatchEvent) => void,

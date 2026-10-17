@@ -18,7 +18,8 @@ public class WatchBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "pushSnapshot", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getPendingEvents", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ackEvent", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "startWatchApp", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "startWatchApp", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "drainProbeResults", returnType: CAPPluginReturnPromise)
     ]
 
     private let coordinator = WatchConnectivityCoordinator.shared
@@ -68,6 +69,16 @@ public class WatchBridgePlugin: CAPPlugin, CAPBridgedPlugin {
             // Not removed: JS retries on its next drain, and TS idempotency
             // ids make re-applying it a no-op.
             call.reject("ackEvent failed: \(error)", nil, error)
+        }
+    }
+
+    /// The background-tap experiment's timings since the last call (see
+    /// WatchConnectivityCoordinator); JS copies them into the app log.
+    @objc func drainProbeResults(_ call: CAPPluginCall) {
+        do {
+            call.resolve(["results": try coordinator.drainProbeResults().map { try $0.jsObject() }])
+        } catch {
+            call.reject("drainProbeResults failed: \(error)", nil, error)
         }
     }
 
