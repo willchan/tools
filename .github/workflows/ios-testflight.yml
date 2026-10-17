@@ -15,7 +15,7 @@ on:
 jobs:
   testflight:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: workout-tracker
@@ -164,6 +164,20 @@ jobs:
             -t ios \
             --apiKey "$ASC_KEY_ID" \
             --apiIssuer "$ASC_ISSUER_ID"
+
+      # Group "Build Distribution" in App Store Connect is "Manual for Xcode
+      # Builds" (automatic distribution only covers Xcode Cloud), so the
+      # build is added to its groups via the API once processing finishes.
+      - name: Add build to TestFlight groups
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          TESTFLIGHT_GROUPS: Me
+        run: |
+          PROPS=ios/App/build/App.xcarchive/Info.plist
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleIdentifier" "$PROPS")
+          BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$PROPS")
+          bun ios/scripts/assign-testflight-groups.ts "$BUNDLE_ID" "$BUILD_NUMBER"
 
       - name: Clean up keychain
         if: always()
