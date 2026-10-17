@@ -1,6 +1,6 @@
 import { WebPlugin } from '@capacitor/core';
 import type { WatchEvent, WatchSnapshot } from '../logic/watchProtocol';
-import type { ReceivedWatchEvent, WatchBridgePlugin } from './watchBridge';
+import type { ReceivedWatchEvent, WatchBridgePlugin, WatchProbeResult } from './watchBridge';
 
 /**
  * Web stand-in for the native WatchBridge plugin, for Playwright tests
@@ -14,6 +14,7 @@ export class WatchBridgeWeb extends WebPlugin implements WatchBridgePlugin {
   private snapshots: WatchSnapshot[] = [];
   private acks: string[] = [];
   private startWatchAppCalls = 0;
+  private probeResults: WatchProbeResult[] = [];
 
   async pushSnapshot(options: { snapshot: WatchSnapshot }): Promise<void> {
     this.snapshots.push(options.snapshot);
@@ -30,6 +31,22 @@ export class WatchBridgeWeb extends WebPlugin implements WatchBridgePlugin {
 
   async startWatchApp(): Promise<void> {
     this.startWatchAppCalls += 1;
+  }
+
+  async drainProbeResults(): Promise<{ results: WatchProbeResult[] }> {
+    const results = this.probeResults;
+    this.probeResults = [];
+    return { results };
+  }
+
+  /** Test-only: the native side measured a tap. */
+  addProbeResult(result: WatchProbeResult): void {
+    this.probeResults.push(result);
+  }
+
+  /** Test-only: what a native plugin method missing from this binary rejects with. */
+  unavailableForTest(): unknown {
+    return this.unimplemented('drainProbeResults');
   }
 
   /**

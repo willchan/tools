@@ -2,7 +2,8 @@
 
 - **Status:** Accepted, 2026-09. Steps 1 (TS), 2 (native `WatchBridge`,
   `AppLogic` on iOS + watchOS) and 3 (the watch app) are implemented. Step 4
-  (a real workout) is pending.
+  (real workouts) confirmed JS suspension; the JavaScriptCore fallback is
+  being measured (see "Background taps").
 - **Related:** [0001](0001-web-first-with-capacitor-shell.md)
 
 ## Context
@@ -171,3 +172,35 @@ What the phone side now expects from the watch app:
   (`queueMs`, `tapToApplyMs`) with the phone locked, how often the watch
   shows "Waiting for iPhone…", and whether a watch-started workout opens on
   the phone without unlocking it.
+
+## Background taps
+
+Step 4's workouts confirmed the JS-suspension risk. In the 2026-10-17 Squat
+Day log, every tap reached the phone's native code 114–228 ms after it was
+made, locked or not, but of 8 taps made with the phone app in the
+background only 3 were applied there (in about 30 ms). Two started and had
+their IndexedDB transaction cut off by the next suspension; three waited
+for the app to be opened. `WKPreferences.inactiveSchedulingPolicy` doesn't
+change this (it's for web views outside a window), and a mirrored workout
+doesn't keep the iPhone app running.
+
+So the fallback above goes ahead: the native side answers taps itself by
+running the same TS reducer in JavaScriptCore, while IndexedDB stays the
+source of truth and the WebView applies the queued taps when it runs.
+
+**First, a measurement.** `src/native/workoutLogicBundle.ts` is built by
+`vite.logic.config.ts` into `dist/native/workout-logic.js`, an IIFE that
+runs with no DOM (checked in `e2e/workout-logic-bundle.spec.ts`), and ships
+in the app binary via `cap sync`; OTA web updates don't replace it.
+`WatchConnectivityCoordinator` runs each newly queued tap through its
+`probe()` (the real `checkWatchEvent` → `applySessionEvent` →
+`buildWatchSnapshot`, against a fixed session) with AppLogic's
+`WorkoutLogicEngine`, and records the timings and app state in a
+`WatchProbeLog`. Nothing computed is sent to the watch. JS copies the
+records into the app log as `watch probe` lines when it next runs.
+
+The test: lock the phone and pocket it for 10+ minutes, then about 20 taps
+over 30 minutes. It passes if every tap has a `watch probe` line with
+`tapToReplyMs` under about 1 s at p95. If it passes, the next step is a
+shadow state: the WebView pushes its session state to native after each
+commit, and native answers taps from it with a real snapshot.
