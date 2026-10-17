@@ -81,7 +81,11 @@ Build order, from ADR 0002:
    glue over AppLogic's `WatchRemoteState`, `WatchTap` and `RestEndAlarm`;
    `ios/scripts/add-watch-app-target.rb` added the target. On the phone,
    `WorkoutMirroring` lets a watch-started workout wake the app.
-4. TestFlight build and one real workout to read the latency logs.
+4. TestFlight build and real workouts to read the latency logs. They
+   confirmed that the WebView's JS is suspended in the background, so the
+   same TS reducer is being moved into JavaScriptCore on the native side,
+   starting with a measurement (`src/native/workoutLogicBundle.ts`,
+   AppLogic's `WorkoutLogicEngine`). See ADR 0002, "Background taps".
 
 ## Commands
 

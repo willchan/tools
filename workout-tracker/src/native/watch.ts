@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { isNativePlatform } from './platform';
 import { WatchBridge } from './watchBridge';
-import type { ReceivedWatchEvent } from './watchBridge';
+import type { ReceivedWatchEvent, WatchProbeResult } from './watchBridge';
 import { log } from '../logic/logger';
 import { buildWatchSnapshot } from '../logic/watchProtocol';
 import type { WatchSnapshotSource } from '../logic/watchProtocol';
@@ -79,8 +79,11 @@ export function initWatchBridge(): void {
     void receive(event);
   }).catch((err) => logFailure('watch listener registration failed', err));
   void drainPending();
+  void drainProbeResults();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void drainPending();
+    if (document.visibilityState !== 'visible') return;
+    void drainPending();
+    void drainProbeResults();
   });
   // The workout screen pushes its own snapshot once it mounts; anywhere
   // else, tell the watch there's nothing running.
@@ -93,6 +96,36 @@ async function drainPending(): Promise<void> {
     for (const event of events) await receive(event);
   } catch (err) {
     logFailure('watch queue drain failed', err);
+  }
+}
+
+/**
+ * Copy the background-tap experiment's native timings into the app log, one
+ * info line per tap (ADR 0002, "Background taps"). App binaries built before
+ * the experiment don't have the method; that's not an error.
+ */
+async function drainProbeResults(): Promise<void> {
+  let results: WatchProbeResult[];
+  try {
+    ({ results } = await WatchBridge.drainProbeResults());
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code !== 'UNIMPLEMENTED') logFailure('watch probe drain failed', err);
+    return;
+  }
+  for (const r of results) {
+    const parts = [
+      `id=${r.eventId}`,
+      `channel=${r.channel}`,
+      r.verdict !== undefined ? `verdict=${r.verdict}` : null,
+      r.error !== undefined ? `error=${r.error}` : null,
+      `tapToNativeMs=${r.receivedAt - r.tapAt}`,
+      `computeMs=${r.computedAt - r.receivedAt}`,
+      `tapToReplyMs=${r.repliedAt - r.tapAt}`,
+      `cold=${r.coldStart}`,
+      r.appState !== undefined ? `appState=${r.appState}` : null,
+      r.backgroundTimeRemaining !== undefined ? `bgRemainingS=${r.backgroundTimeRemaining}` : null,
+    ];
+    await log('info', 'watch probe', parts.filter((p) => p !== null).join(' ')).catch(() => {});
   }
 }
 

@@ -445,6 +445,95 @@ test.describe('Apple Watch bridge — failures reach the Settings error badge', 
   });
 });
 
+test.describe('Apple Watch bridge — background-tap experiment', () => {
+  // The native side times each tap it runs through the reducer bundle in
+  // JavaScriptCore (WatchConnectivityCoordinator); JS copies the timings
+  // into the app log, which is what the user exports.
+  const probe = {
+    eventId: 'tap-1',
+    channel: 'message',
+    tapAt: 1_000,
+    receivedAt: 1_150,
+    computedAt: 1_170,
+    repliedAt: 1_171,
+    coldStart: true,
+    verdict: 'apply',
+    appState: 'background',
+    backgroundTimeRemaining: 29.5,
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await forceNative(page);
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+  });
+
+  async function addProbe(page: Page, result: Record<string, unknown>) {
+    await page.evaluate(async (r) => {
+      const { watchBridgeWeb } = await import('/src/native/watchBridgeWeb.ts');
+      watchBridgeWeb.addProbeResult(r as never);
+    }, result);
+  }
+
+  async function logsNamed(page: Page, prefix: string) {
+    return page.evaluate(async (p) => {
+      const { getAllLogs } = await import('/src/logic/logger.ts');
+      return (await getAllLogs())
+        .filter((l) => l.message.startsWith(p))
+        .map((l) => ({ level: l.level, message: l.message, context: l.context }));
+    }, prefix);
+  }
+
+  test('native probe timings are copied into the app log when the page becomes visible', async ({ page }) => {
+    await addProbe(page, probe);
+    await addProbe(page, { ...probe, eventId: 'tap-2', coldStart: false, verdict: undefined, error: 'bundleMissing', backgroundTimeRemaining: undefined, appState: 'active' });
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    await expect.poll(() => logsNamed(page, 'watch probe')).toEqual([
+      {
+        level: 'info',
+        message: 'watch probe',
+        context:
+          'id=tap-1 channel=message verdict=apply tapToNativeMs=150 computeMs=20 tapToReplyMs=171 ' +
+          'cold=true appState=background bgRemainingS=29.5',
+      },
+      {
+        level: 'info',
+        message: 'watch probe',
+        context:
+          'id=tap-2 channel=message error=bundleMissing tapToNativeMs=150 computeMs=20 tapToReplyMs=171 ' +
+          'cold=false appState=active',
+      },
+    ]);
+    const left = await page.evaluate(async () => {
+      const { watchBridgeWeb } = await import('/src/native/watchBridgeWeb.ts');
+      return (await watchBridgeWeb.drainProbeResults()).results;
+    });
+    expect(left).toEqual([]);
+  });
+
+  test('an app binary built before the experiment is skipped quietly', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { watchBridgeWeb } = await import('/src/native/watchBridgeWeb.ts');
+      watchBridgeWeb.drainProbeResults = () => Promise.reject(watchBridgeWeb.unavailableForTest());
+    });
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(300);
+    expect(await logsNamed(page, 'watch')).toEqual([]);
+  });
+
+  test('a failed drain is logged as an error', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { watchBridgeWeb } = await import('/src/native/watchBridgeWeb.ts');
+      watchBridgeWeb.drainProbeResults = () => Promise.reject(new Error('disk full'));
+    });
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect
+      .poll(() => logsNamed(page, 'watch probe'))
+      .toEqual([{ level: 'error', message: 'watch probe drain failed: disk full', context: undefined }]);
+  });
+});
+
 test.describe('Apple Watch bridge — parity', () => {
   test('a watch completeSet leaves IndexedDB identical to the same phone tap', async ({ browser }) => {
     const fixedNow = new Date('2026-09-27T10:00:00Z');

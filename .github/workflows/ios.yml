@@ -163,6 +163,18 @@ jobs:
           check WKCompanionAppBundleIdentifier "$APP_ID"
           check WKBackgroundModes.0 workout-processing
 
+      # WatchConnectivityCoordinator runs this bundle in JavaScriptCore for
+      # the background-tap experiment (ADR 0002, "Background taps").
+      - name: Check the workout logic bundle is in the app
+        working-directory: workout-tracker/ios/App
+        run: |
+          BUNDLE="$APP_PATH/public/native/workout-logic.js"
+          if ! grep -q 'var WorkoutLogic' "$BUNDLE" 2>/dev/null; then
+            echo "::error::$BUNDLE is missing or doesn't define WorkoutLogic"
+            ls -la "$APP_PATH/public" "$APP_PATH/public/native" 2>&1 || true
+            exit 1
+          fi
+
       - name: Wait for the Simulator to finish booting
         run: |
           t0=$SECONDS
