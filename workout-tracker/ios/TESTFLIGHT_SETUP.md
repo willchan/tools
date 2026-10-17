@@ -143,3 +143,13 @@ Actions tab → "iOS TestFlight" workflow → Run workflow. ~10-15 min later
 the build shows up in App Store Connect → TestFlight, and (since you're
 the account holder, you're automatically an internal tester — no Beta App
 Review needed) in the TestFlight app on your phone.
+
+The workflow's last step waits for App Store Connect to finish processing
+the build, then adds it to the TestFlight groups named in
+`TESTFLIGHT_GROUPS` (currently `Me`) via
+`ios/scripts/assign-testflight-groups.ts`. A group's own "Build
+Distribution" setting reads "Manual for Xcode Builds" because automatic
+distribution only covers Xcode Cloud builds, so this step is what saves the
+manual assignment. To distribute to another group, add its exact name
+(comma-separated) in `ios-testflight.yml`. External groups also need Beta
+App Review before testers see the build.
