@@ -450,6 +450,22 @@ test.describe('Native Live Activity wiring', () => {
 });
 
 test.describe('Native data export', () => {
+  // The share sheet counts every item it's given. Passing the same file as
+  // both `url` and `files` showed "2 Documents" and saved two identical
+  // copies. The file goes in exactly once.
+  test('the share sheet gets the exported file exactly once', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+    const options = await page.evaluate(async () => {
+      const { shareOptionsForFile } = await import('/src/native/shareFile.ts');
+      return shareOptionsForFile('file:///cache/workout-logs-2026-10-17.json', 'workout-logs-2026-10-17.json');
+    });
+    expect(options).toEqual({
+      title: 'workout-logs-2026-10-17.json',
+      url: 'file:///cache/workout-logs-2026-10-17.json',
+    });
+  });
+
   test('export writes a file via Filesystem and opens the native share sheet', async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
