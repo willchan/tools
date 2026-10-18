@@ -5,7 +5,7 @@ import os
 import AppLogic
 
 /// The phone's WCSession delegate: thin glue between WatchConnectivity and
-/// AppLogic's WatchInbox (decode, disk queue, ack). See
+/// AppLogic's WatchInbox (decode, disk queue, ack) and WatchAnswerer. See
 /// docs/adr/0002-apple-watch-remote.md.
 ///
 /// Activated from AppDelegate at launch rather than by the WatchBridge
@@ -13,10 +13,11 @@ import AppLogic
 /// disk queue even if no WebView (and so no plugin) ever loads. JS drains
 /// the queue with getPendingEvents once it runs.
 ///
-/// Also runs the background-tap experiment (ADR 0002, "Background taps"):
-/// each newly queued tap goes through the reducer bundle in JavaScriptCore,
-/// and the timings are logged for JS to copy into the app log. Nothing it
-/// computes is sent: it measures whether the phone could answer natively.
+/// Each newly queued tap is also answered natively (ADR 0002, "Background
+/// taps"): the reducer bundle runs in JavaScriptCore over the WebView's
+/// latest shadow and the queue, and the resulting snapshot goes straight to
+/// the watch, so it doesn't wait for a suspended WebView. Timings are logged
+/// for JS to copy into the app log.
 final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
     static let shared = WatchConnectivityCoordinator()
 
@@ -28,14 +29,13 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
 
     private let logger = Logger(subsystem: "com.willchan.workouttracker", category: "WatchBridge")
     private let lock = NSLock()
-    /// The last snapshot JS pushed, resent once the session activates or the
+    /// The newest snapshot sent, resent once the session activates or the
     /// watch app gets installed. Only the latest one matters.
     private var latestContext: [String: Any]?
+    private var latestSeq: Int64 = 0
 
-    private let probeLog: WatchProbeLog
-    private let probeLock = NSLock()
-    /// Created on the first tap and kept while the process lives.
-    private var probeEngine: WorkoutLogicEngine?
+    private let answerer = WatchAnswerer(makeEngine: WatchConnectivityCoordinator.loadEngine)
+    private let answerLog: WatchProbeLog
 
     private var session: WCSession? {
         WCSession.isSupported() ? WCSession.default : nil
@@ -45,7 +45,7 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let queue = WatchEventQueue(fileURL: support.appendingPathComponent("WatchBridge/pending-events.json"))
         inbox = WatchInbox(queue: queue)
-        probeLog = WatchProbeLog(fileURL: support.appendingPathComponent("WatchBridge/probe-results.json"))
+        answerLog = WatchProbeLog(fileURL: support.appendingPathComponent("WatchBridge/probe-results.json"))
         super.init()
         if let setAside = queue.recoveredCorruptFileURL {
             logger.error("watch event queue was unreadable; moved to \(setAside.path, privacy: .public)")
@@ -64,16 +64,44 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
         return session.isPaired && session.isWatchAppInstalled
     }
 
-    /// Send the watch the latest snapshot. Without a paired watch that has
-    /// the app, it's kept for later rather than reported as an error: most
-    /// launches of this app have no watch app to talk to.
-    func push(_ snapshot: WatchSnapshot) throws {
+    /// The WebView's latest snapshot and the shadow it was built from (nil
+    /// when idle). With taps still queued, the watch gets the native answer
+    /// over them instead, so a WebView that hasn't applied them yet can't
+    /// take it back.
+    func push(_ snapshot: WatchSnapshot, shadowJSON: String?) throws {
+        let pending = inbox.queue.pending().map(\.event)
+        let result = answerer.webViewPushed(
+            snapshot, shadowJSON: shadowJSON, pending: pending, now: Self.epochMilliseconds())
+        if let error = result.error {
+            logger.error("answering queued taps failed: \(String(describing: error), privacy: .public)")
+        }
+        try send(result.snapshot)
+    }
+
+    /// Send the watch a snapshot: as the application context, which the
+    /// watch reads whenever it next runs, and as a message too when the
+    /// watch app is in front, which arrives sooner. Without a paired watch
+    /// that has the app, it's kept for later rather than reported as an
+    /// error: most launches of this app have no watch app to talk to. A
+    /// snapshot older than one already sent (two threads racing) is dropped.
+    @discardableResult
+    private func send(_ snapshot: WatchSnapshot) throws -> [String: Any] {
         let context = try WatchMessage.snapshotContext(snapshot)
         lock.lock()
-        latestContext = context
+        let isNewest = snapshot.seq >= latestSeq
+        if isNewest {
+            latestContext = context
+            latestSeq = snapshot.seq
+        }
         lock.unlock()
-        guard watchAppAvailable, let session else { return }
+        guard isNewest, watchAppAvailable, let session else { return context }
         try session.updateApplicationContext(context)
+        if session.isReachable {
+            session.sendMessage(context, replyHandler: nil) { [logger] error in
+                logger.info("snapshot message failed, the context still has it: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return context
     }
 
     private func flushLatestContext() {
@@ -88,64 +116,65 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
         }
     }
 
-    /// The experiment's measurements since the last call, oldest first.
+    /// Answer timings since the last call, oldest first.
     func drainProbeResults() throws -> [WatchProbeRecord] {
-        try probeLog.drain()
+        try answerLog.drain()
     }
 
     /// Queue the tap on disk; the returned reply acks it only once it's there.
-    /// A newly queued tap is also measured (see `probe`).
-    private func handle(_ message: [String: Any], channel: String) -> (reply: [String: Any], probe: WatchProbeRecord?) {
+    /// A newly queued tap is then answered (see `answer`), and the reply
+    /// carries that snapshot too.
+    private func handle(_ message: [String: Any], channel: String) -> (reply: [String: Any], record: WatchProbeRecord?) {
         let receipt = inbox.receive(message, at: Date())
-        var measured: WatchProbeRecord?
         switch receipt.outcome {
         case .queued(let event):
             DispatchQueue.main.async { self.onEvent?(event) }
-            measured = probe(event, channel: channel)
+            let (context, record) = answer(event, channel: channel)
+            let reply = context.map { receipt.reply.merging($0) { ack, _ in ack } } ?? receipt.reply
+            return (reply, record)
         case .duplicate:
-            break
+            return (receipt.reply, nil)
         case .rejected(let reason):
             logger.error("watch message not queued: \(reason, privacy: .public)")
+            return (receipt.reply, nil)
         }
-        return (receipt.reply, measured)
     }
 
-    // MARK: - Background-tap experiment
+    // MARK: - Answering taps natively
 
-    /// Run a queued tap through the reducer bundle and time it. Only after
-    /// the tap is on disk, and a failure is only recorded, so the tap's ack
-    /// and the real workout are unaffected.
-    private func probe(_ received: ReceivedWatchEvent, channel: String) -> WatchProbeRecord {
-        probeLock.lock()
-        defer { probeLock.unlock() }
+    /// Answer the queue (this tap included) from the WebView's shadow and
+    /// send the snapshot. Only after the tap is on disk, and a failure is
+    /// only logged: the WebView still applies the tap when it runs. Returns
+    /// the context sent, if any, and the timing record.
+    private func answer(_ received: ReceivedWatchEvent, channel: String) -> ([String: Any]?, WatchProbeRecord) {
+        let pending = inbox.queue.pending().map(\.event)
+        var context: [String: Any]?
         var coldStart = false
         var verdict: String?
         var failure: String?
         do {
-            let eventJSON = String(decoding: try JSONEncoder().encode(received.event), as: UTF8.self)
-            let engine: WorkoutLogicEngine
-            if let existing = probeEngine {
-                engine = existing
+            if let answer = try answerer.answer(pending: pending, now: Self.epochMilliseconds()) {
+                coldStart = answer.coldStart
+                if let index = pending.firstIndex(where: { $0.id == received.event.id }), index < answer.verdicts.count {
+                    verdict = answer.verdicts[index]
+                }
+                context = try send(answer.snapshot)
             } else {
-                coldStart = true
-                engine = try Self.loadProbeEngine()
-                probeEngine = engine
+                failure = "noShadow"
             }
-            let result = try engine.probe(eventJSON: eventJSON, now: Self.epochMilliseconds())
-            let object = try JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any]
-            verdict = object?["verdict"] as? String
         } catch {
             failure = "\(error)"
         }
-        return WatchProbeRecord(
+        let record = WatchProbeRecord(
             eventId: received.event.id, channel: channel, tapAt: received.event.at,
             receivedAt: received.receivedAt, computedAt: Self.epochMilliseconds(), repliedAt: 0,
             coldStart: coldStart, verdict: verdict, error: failure)
+        return (context, record)
     }
 
     /// Stamp the reply time and the app's state, and keep the record.
-    private func keep(_ measured: WatchProbeRecord?) {
-        guard var record = measured else { return }
+    private func keep(_ record: WatchProbeRecord?) {
+        guard var record else { return }
         record.repliedAt = Self.epochMilliseconds()
         DispatchQueue.main.async {
             let app = UIApplication.shared
@@ -159,23 +188,24 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
             let remaining = app.backgroundTimeRemaining
             record.backgroundTimeRemaining = remaining < 86_400 ? remaining : nil
             do {
-                try self.probeLog.append(record)
+                try self.answerLog.append(record)
             } catch {
-                self.logger.error("probe result not saved: \(error.localizedDescription, privacy: .public)")
+                self.logger.error("answer timing not saved: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
 
-    private enum ProbeError: Error {
+    private enum EngineError: Error {
         case bundleMissing
     }
 
     /// The reducer bundle shipped in the app binary (`bun run build` puts it
     /// in dist/native/, which `cap sync` copies into public/). OTA web
-    /// updates don't replace it.
-    private static func loadProbeEngine() throws -> WorkoutLogicEngine {
+    /// updates don't replace it, so a protocol change to the shadow needs a
+    /// TestFlight build too.
+    private static func loadEngine() throws -> WatchAnswerEngine {
         guard let url = Bundle.main.url(forResource: "workout-logic", withExtension: "js", subdirectory: "public/native") else {
-            throw ProbeError.bundleMissing
+            throw EngineError.bundleMissing
         }
         return try WorkoutLogicEngine(script: String(contentsOf: url, encoding: .utf8), sourceURL: url)
     }
@@ -209,11 +239,11 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
     /// before returning. (A disk failure here can only be logged; the
     /// sendMessage path below can tell the watch to retry.)
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        keep(handle(userInfo, channel: "userInfo").probe)
+        keep(handle(userInfo, channel: "userInfo").record)
     }
 
     /// sendMessage, when the phone is reachable: the fast path. The reply
-    /// acks the tap only once it's on disk.
+    /// acks the tap only once it's on disk, and carries the answer.
     func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any],
@@ -221,10 +251,10 @@ final class WatchConnectivityCoordinator: NSObject, WCSessionDelegate {
     ) {
         let handled = handle(message, channel: "message")
         replyHandler(handled.reply)
-        keep(handled.probe)
+        keep(handled.record)
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        keep(handle(message, channel: "message").probe)
+        keep(handle(message, channel: "message").record)
     }
 }

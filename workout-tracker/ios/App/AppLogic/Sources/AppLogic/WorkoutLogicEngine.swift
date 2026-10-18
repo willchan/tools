@@ -11,7 +11,7 @@ import JavaScriptCore
 /// no workout rules anyway.
 ///
 /// Not thread-safe: use one engine from one thread at a time.
-public final class WorkoutLogicEngine {
+public final class WorkoutLogicEngine: WatchAnswerEngine {
     public enum Error: Swift.Error, Equatable {
         case noContext
         /// The script threw, while loading or during a call.
@@ -34,10 +34,10 @@ public final class WorkoutLogicEngine {
         try throwIfException()
     }
 
-    /// `WorkoutLogic.probe`: a watch tap (JSON) through the reducer against
-    /// a fixed session, returning `{verdict, snapshot}` as JSON.
-    public func probe(eventJSON: String, now: Double) throws -> String {
-        try callReturningString("probe", [eventJSON, now])
+    /// `WorkoutLogic.answer`: the queued taps (JSON) through the reducer over
+    /// the WebView's shadow, returning `{snapshot, verdicts}` as JSON.
+    public func answer(shadowJSON: String, eventsJSON: String, seq: Int64, now: Double) throws -> String {
+        try callReturningString("answer", [shadowJSON, eventsJSON, Double(seq), now])
     }
 
     private func callReturningString(_ name: String, _ arguments: [Any]) throws -> String {

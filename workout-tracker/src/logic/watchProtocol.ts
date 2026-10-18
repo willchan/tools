@@ -1,7 +1,9 @@
-import type { Exercise } from '../db/types';
+import type { Exercise, TemplateSet } from '../db/types';
 import { calculatePlates, formatPlates } from './calculator';
 import { resolveExerciseName } from './exerciseName';
 import { applySessionEvent, getEffectiveReps, getSetWeight } from './workoutSession';
+import { computeVolumeProgress, getVolumeGroupKey } from './volume';
+import type { VolumeGroup } from './volume';
 import type { SessionContext, SessionEvent, SessionState } from './workoutSession';
 
 /**
@@ -163,6 +165,12 @@ export interface WatchWorkoutView {
    * completing this set starts no rest.
    */
   restAfterSetSeconds: number | null;
+  /**
+   * For a set with a rep-total target (accessories, BBB): reps done so far
+   * in its group and the target, as the phone shows ("x/y reps so far").
+   * Null for sets without one (main sets, AMRAP).
+   */
+  volume: { done: number; target: number } | null;
 }
 
 export interface WatchSnapshot {
@@ -213,6 +221,110 @@ export function buildWatchSnapshot(seq: number, source: WatchSnapshotSource | nu
       restEndTime: session.timer?.expectedEndTime ?? null,
       restLocksDone: session.timer ? session.restLocksDone : false,
       restAfterSetSeconds: preview?.restStarted ? ctx.restTimerSeconds : null,
+      volume: set ? volumeFor(session, set, ctx) : null,
     },
+  };
+}
+
+function volumeFor(session: SessionState, set: TemplateSet, ctx: SessionContext): WatchWorkoutView['volume'] {
+  const key = getVolumeGroupKey(set);
+  if (!key) return null;
+  const progress = computeVolumeProgress(
+    key,
+    session.workoutSets,
+    session.completedSets.map((c) => c.actualReps),
+    session.currentSetIndex,
+    ctx.volumeGroups,
+  );
+  return progress ? { done: progress.cumulative, target: progress.target } : null;
+}
+
+/**
+ * Everything the native side needs to answer a watch tap while the WebView
+ * is suspended (ADR 0002, "Background taps"): a `WatchSnapshotSource` as
+ * plain JSON. The WebView pushes one with every snapshot; the iOS app runs
+ * `answerWatchEvents` over it in JavaScriptCore.
+ */
+export interface WatchShadow {
+  v: number;
+  session: SessionState;
+  ctx: {
+    volumeGroups: [string, VolumeGroup][];
+    tmMap: [string, number][];
+    intersperseAccessories: boolean;
+    restTimerSeconds: number;
+  };
+  dayName: string;
+  /** Only the exercises this workout uses. */
+  exercises: Exercise[];
+}
+
+export function encodeWatchShadow(source: WatchSnapshotSource): WatchShadow {
+  const { session, ctx, dayName } = source;
+  const used = new Set(session.workoutSets.map((set) => set.exerciseId));
+  return {
+    v: WATCH_PROTOCOL_VERSION,
+    session,
+    ctx: {
+      volumeGroups: [...ctx.volumeGroups.entries()],
+      tmMap: [...ctx.tmMap.entries()],
+      intersperseAccessories: ctx.intersperseAccessories,
+      restTimerSeconds: ctx.restTimerSeconds,
+    },
+    dayName,
+    exercises: source.exercises.filter((e) => used.has(e.id)),
+  };
+}
+
+export function decodeWatchShadow(shadow: WatchShadow): WatchSnapshotSource {
+  return {
+    session: shadow.session,
+    ctx: {
+      volumeGroups: new Map(shadow.ctx.volumeGroups),
+      tmMap: new Map(shadow.ctx.tmMap),
+      intersperseAccessories: shadow.ctx.intersperseAccessories,
+      restTimerSeconds: shadow.ctx.restTimerSeconds,
+    },
+    dayName: shadow.dayName,
+    exercises: shadow.exercises,
+  };
+}
+
+/** What became of each tap in `answerWatchEvents`. */
+export type WatchAnswerVerdict = WatchEventVerdict['kind'] | 'skipped';
+
+/**
+ * Apply queued taps, in order, to a shadow the way the workout screen does
+ * (workout.ts `handleEvent`), and build the snapshot that answers them. A
+ * tap the WebView has already applied is a duplicate, so the whole native
+ * queue can be passed. `start` is skipped: it opens a workout, which only
+ * the WebView does. Finish answers with idle.
+ */
+export function answerWatchEvents(
+  shadow: WatchShadow,
+  events: WatchEvent[],
+  seq: number,
+  now: number,
+): { snapshot: WatchSnapshot; verdicts: WatchAnswerVerdict[] } {
+  const source = decodeWatchShadow(shadow);
+  let session = source.session;
+  let finished = false;
+  const verdicts: WatchAnswerVerdict[] = [];
+  for (const event of events) {
+    if (event.type === 'start' || finished) {
+      verdicts.push('skipped');
+      continue;
+    }
+    const verdict = checkWatchEvent(session, event, now);
+    if (verdict.kind === 'apply') {
+      session = recordAppliedEventId(applySessionEvent(session, verdict.event, source.ctx).state, event.id);
+    } else if (verdict.kind === 'finish') {
+      finished = true;
+    }
+    verdicts.push(verdict.kind);
+  }
+  return {
+    snapshot: buildWatchSnapshot(seq, finished ? null : { ...source, session }),
+    verdicts,
   };
 }

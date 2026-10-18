@@ -3,7 +3,7 @@ import { isNativePlatform } from './platform';
 import { WatchBridge } from './watchBridge';
 import type { ReceivedWatchEvent, WatchProbeResult } from './watchBridge';
 import { isTransientIdbError, log } from '../logic/logger';
-import { buildWatchSnapshot } from '../logic/watchProtocol';
+import { buildWatchSnapshot, encodeWatchShadow } from '../logic/watchProtocol';
 import type { WatchSnapshotSource } from '../logic/watchProtocol';
 import { getActiveWorkout } from '../db/database';
 import { navigate, parseHash } from '../ui/router';
@@ -100,9 +100,9 @@ async function drainPending(): Promise<void> {
 }
 
 /**
- * Copy the background-tap experiment's native timings into the app log, one
+ * Copy the timings of taps the native side answered into the app log, one
  * info line per tap (ADR 0002, "Background taps"). App binaries built before
- * the experiment don't have the method; that's not an error.
+ * that don't have the method; that's not an error.
  */
 async function drainProbeResults(): Promise<void> {
   let results: WatchProbeResult[];
@@ -231,7 +231,10 @@ export async function pushWatchSnapshot(): Promise<void> {
   if (!bridgeAvailable()) return;
   try {
     const source = liveHost()?.snapshotSource() ?? null;
-    await WatchBridge.pushSnapshot({ snapshot: buildWatchSnapshot(nextSeq(), source) });
+    await WatchBridge.pushSnapshot({
+      snapshot: buildWatchSnapshot(nextSeq(), source),
+      shadow: source ? encodeWatchShadow(source) : null,
+    });
   } catch (err) {
     logFailure('watch snapshot push failed', err);
   }

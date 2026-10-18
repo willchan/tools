@@ -17,6 +17,7 @@
     "isBonus": false,
     "restEndTime": null,
     "restLocksDone": false,
-    "restAfterSetSeconds": 120
+    "restAfterSetSeconds": 120,
+    "volume": null
   }
 }

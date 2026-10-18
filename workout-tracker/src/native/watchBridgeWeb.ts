@@ -1,5 +1,5 @@
 import { WebPlugin } from '@capacitor/core';
-import type { WatchEvent, WatchSnapshot } from '../logic/watchProtocol';
+import type { WatchEvent, WatchShadow, WatchSnapshot } from '../logic/watchProtocol';
 import type { ReceivedWatchEvent, WatchBridgePlugin, WatchProbeResult } from './watchBridge';
 
 /**
@@ -12,12 +12,14 @@ import type { ReceivedWatchEvent, WatchBridgePlugin, WatchProbeResult } from './
 export class WatchBridgeWeb extends WebPlugin implements WatchBridgePlugin {
   private pending: ReceivedWatchEvent[] = [];
   private snapshots: WatchSnapshot[] = [];
+  private shadows: (WatchShadow | null)[] = [];
   private acks: string[] = [];
   private startWatchAppCalls = 0;
   private probeResults: WatchProbeResult[] = [];
 
-  async pushSnapshot(options: { snapshot: WatchSnapshot }): Promise<void> {
+  async pushSnapshot(options: { snapshot: WatchSnapshot; shadow: WatchShadow | null }): Promise<void> {
     this.snapshots.push(options.snapshot);
+    this.shadows.push(options.shadow);
   }
 
   async getPendingEvents(): Promise<{ events: ReceivedWatchEvent[] }> {
@@ -63,12 +65,14 @@ export class WatchBridgeWeb extends WebPlugin implements WatchBridgePlugin {
   /** Test-only: everything the TS side has sent. */
   async getRecorded(): Promise<{
     snapshots: WatchSnapshot[];
+    shadows: (WatchShadow | null)[];
     acks: string[];
     pending: ReceivedWatchEvent[];
     startWatchAppCalls: number;
   }> {
     return {
       snapshots: [...this.snapshots],
+      shadows: [...this.shadows],
       acks: [...this.acks],
       pending: [...this.pending],
       startWatchAppCalls: this.startWatchAppCalls,

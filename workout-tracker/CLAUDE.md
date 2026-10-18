@@ -83,9 +83,11 @@ Build order, from ADR 0002:
    `WorkoutMirroring` lets a watch-started workout wake the app.
 4. TestFlight build and real workouts to read the latency logs. They
    confirmed that the WebView's JS is suspended in the background, so the
-   same TS reducer is being moved into JavaScriptCore on the native side,
-   starting with a measurement (`src/native/workoutLogicBundle.ts`,
-   AppLogic's `WorkoutLogicEngine`). See ADR 0002, "Background taps".
+   phone answers watch taps natively: the same TS reducer, built as
+   `src/native/workoutLogicBundle.ts`, runs in JavaScriptCore over a shadow
+   the WebView pushes (AppLogic's `WatchAnswerer` and `WorkoutLogicEngine`).
+   A change to `answerWatchEvents` or the shadow needs a TestFlight build to
+   reach it. See ADR 0002, "Background taps".
 
 ## Commands
 

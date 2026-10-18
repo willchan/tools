@@ -227,6 +227,7 @@ test.describe('watch protocol', () => {
         restEndTime: null,
         restLocksDone: false,
         restAfterSetSeconds: 120,
+        volume: null,
       },
     });
     // An accessory done during a primary set's rest starts no rest of its own.
@@ -251,6 +252,135 @@ test.describe('watch protocol', () => {
  * given a new value on either side fails one suite or the other. Regenerate a
  * snapshot fixture from the `actual` value printed on failure.
  */
+test.describe('watch protocol — rep-total progress on the watch', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+  });
+
+  // The phone shows "x/y reps so far · z to go" for sets with a rep-total
+  // target (accessories, BBB); the watch gets the same numbers.
+  test('the snapshot carries reps done so far and the target, for sets that have one', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      const { createSession, createSessionContext, applySessionEvent } = await import('/src/logic/workoutSession.ts');
+      const { buildWatchSnapshot } = await import('/src/logic/watchProtocol.ts');
+      const { getVolumeGroupKey } = await import('/src/logic/volume.ts');
+      const { getDefault531Template, getDefaultExercises } = await import('/src/db/defaults.ts');
+      const sets = getDefault531Template().weeks[0].days[0].sets;
+      const exercises = getDefaultExercises();
+      const ctx = createSessionContext(sets, new Map([['squat', 225]]), { restTimerSeconds: 120, intersperseAccessories: true });
+      const s0 = createSession(sets, { intersperseAccessories: true, startedAt: 1000 });
+      const s1 = applySessionEvent(s0, { type: 'completeSet', at: 2000 }, ctx).state; // a leg curl is next
+      const legCurl = s1.workoutSets[s1.currentSetIndex];
+      const target = ctx.volumeGroups.get(getVolumeGroupKey(legCurl)!)!.target;
+      // Do that leg curl short, then find the next leg curl.
+      let s = applySessionEvent(s1, { type: 'completeSet', at: 3000, reps: 7 }, ctx).state;
+      while (s.workoutSets[s.currentSetIndex]?.exerciseId !== legCurl.exerciseId) {
+        s = applySessionEvent(s, { type: 'completeSet', at: 4000 }, ctx).state;
+      }
+      const source = (session: typeof s0) => ({ session, ctx, dayName: 'Squat Day', exercises });
+      return {
+        main: buildWatchSnapshot(1, source(s0)).workout!.volume,
+        firstLegCurl: buildWatchSnapshot(2, source(s1)).workout!.volume,
+        nextLegCurl: buildWatchSnapshot(3, source(s)).workout!.volume,
+        target,
+      };
+    });
+    expect(r.main).toBeNull();
+    expect(r.firstLegCurl).toEqual({ done: 0, target: r.target });
+    expect(r.nextLegCurl).toEqual({ done: 7, target: r.target });
+  });
+});
+
+test.describe('watch protocol — answering taps natively', () => {
+  // The WebView pushes a "shadow" of its session with every snapshot. When a
+  // tap arrives while the WebView is suspended, the iOS app runs the same
+  // reducer over it in JavaScriptCore (src/native/workoutLogicBundle.ts) and
+  // answers the watch right away. The answer must be exactly what the
+  // WebView will compute when it applies the tap later.
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+  });
+
+  async function scenario(page: import('@playwright/test').Page, events: Record<string, unknown>[], doneSets = 0) {
+    return page.evaluate(
+      async ({ events, doneSets }) => {
+        const ws = await import('/src/logic/workoutSession.ts');
+        const wp = await import('/src/logic/watchProtocol.ts');
+        const { getDefault531Template, getDefaultExercises } = await import('/src/db/defaults.ts');
+        const sets = getDefault531Template().weeks[0].days[0].sets;
+        const ctx = ws.createSessionContext(sets, new Map([['squat', 225]]), { restTimerSeconds: 120, intersperseAccessories: true });
+        let session = ws.createSession(sets, { intersperseAccessories: true, startedAt: 1000 });
+        for (let i = 0; i < doneSets; i++) session = ws.applySessionEvent(session, { type: 'completeSet', at: 1500 }, ctx).state;
+        const source = { session, ctx, dayName: 'Squat Day', exercises: getDefaultExercises() };
+        const shadow = JSON.parse(JSON.stringify(wp.encodeWatchShadow(source)));
+        const setId = wp.setIdFor(session);
+        const resolved = events.map((e) => ({ v: 1, ...e, setId: e.setId === 'current' ? setId : e.setId }));
+        const answer = wp.answerWatchEvents(shadow, resolved as never, 99, 50_000);
+
+        // What the WebView does with the same taps (workout.ts handleEvent).
+        let expected = session;
+        let finished = false;
+        for (const e of resolved) {
+          const verdict = wp.checkWatchEvent(expected, e as never, 50_000);
+          if (verdict.kind === 'apply') {
+            expected = wp.recordAppliedEventId(ws.applySessionEvent(expected, verdict.event, ctx).state, (e as { id: string }).id);
+          } else if (verdict.kind === 'finish') {
+            finished = true;
+          }
+        }
+        return {
+          answer,
+          expected: wp.buildWatchSnapshot(99, finished ? null : { ...source, session: expected }),
+          decodedMatches:
+            JSON.stringify(wp.buildWatchSnapshot(5, wp.decodeWatchShadow(shadow))) ===
+            JSON.stringify(wp.buildWatchSnapshot(5, source)),
+          shadowSetIds: [...new Set(shadow.exercises.map((x: { id: string }) => x.id))].length,
+          setExercises: new Set(sets.map((x) => x.exerciseId)).size,
+        };
+      },
+      { events, doneSets },
+    );
+  }
+
+  test('the shadow is plain JSON that decodes back to the same session', async ({ page }) => {
+    const r = await scenario(page, []);
+    expect(r.decodedMatches).toBe(true);
+    // Only the exercises this workout uses travel with it.
+    expect(r.shadowSetIds).toBe(r.setExercises);
+  });
+
+  test('a completeSet is answered with the snapshot the WebView will compute', async ({ page }) => {
+    const r = await scenario(page, [{ id: 'a', at: 40_000, type: 'completeSet', setId: 'current', reps: 4 }]);
+    expect(r.answer.verdicts).toEqual(['apply']);
+    expect(r.answer.snapshot).toEqual(r.expected);
+    expect(r.answer.snapshot.workout!.setNumber).toBe(2);
+  });
+
+  test('several queued taps are folded in order, and a redelivered one is a no-op', async ({ page }) => {
+    const r = await scenario(page, [
+      { id: 'a', at: 40_000, type: 'completeSet', setId: 'current' },
+      { id: 'a', at: 40_000, type: 'completeSet', setId: 'current' },
+      { id: 'late', at: 40_000, type: 'completeSet', setId: 'some-old-set' },
+    ]);
+    expect(r.answer.verdicts).toEqual(['apply', 'duplicate', 'stale']);
+    expect(r.answer.snapshot).toEqual(r.expected);
+  });
+
+  test('a start tap is left to the WebView', async ({ page }) => {
+    const r = await scenario(page, [{ id: 's', at: 40_000, type: 'start' }]);
+    expect(r.answer.verdicts).toEqual(['skipped']);
+    expect(r.answer.snapshot).toEqual(r.expected);
+  });
+
+  test('finish after the last set answers with idle', async ({ page }) => {
+    const r = await scenario(page, [{ id: 'f', at: 40_000, type: 'finish', setId: 'current' }], 14);
+    expect(r.answer.verdicts).toEqual(['finish']);
+    expect(r.answer.snapshot).toEqual({ v: 1, seq: 99, status: 'idle', workout: null });
+  });
+});
+
 test.describe('watch protocol — Swift fixtures', () => {
   const fixtureDir = fileURLToPath(new URL('../ios/App/AppLogic/Tests/AppLogicTests/Fixtures/', import.meta.url));
   const fixture = (name: string): Record<string, unknown> =>
