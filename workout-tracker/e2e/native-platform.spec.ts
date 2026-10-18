@@ -449,6 +449,66 @@ test.describe('Native Live Activity wiring', () => {
   });
 });
 
+test.describe('Native Live Activity — one card per workout', () => {
+  // The plugin adopts a card that survived a relaunch only once its own
+  // async init finishes, and silently ignores updates for a card it doesn't
+  // track. Starting another card under the same id orphans the first one,
+  // frozen on the lock screen. These drive liveActivity.ts against a fake
+  // plugin to pin down the calls it makes.
+  type Call = string;
+
+  async function run(page: import('@playwright/test').Page, opts: { listed: string[]; adoptAfter: number }) {
+    return page.evaluate(async ({ listed, adoptAfter }) => {
+      const calls: string[] = [];
+      let polls = 0;
+      const fake = {
+        listActivities: async () => {
+          calls.push('list');
+          return { items: listed.map((state) => ({ id: 'workout-session', activityId: 'a1', state })) };
+        },
+        isRunning: async () => {
+          calls.push('isRunning');
+          polls += 1;
+          return { value: polls > adoptAfter };
+        },
+        endActivity: async () => void calls.push('end'),
+        startActivity: async () => void calls.push('start'),
+        updateActivity: async () => void calls.push('update'),
+      };
+      const { startWorkoutActivityWith } = await import('/src/native/liveActivity.ts');
+      await startWorkoutActivityWith(fake as never, {
+        dayName: 'OHP Day', exerciseName: 'Overhead Press', setIndex: 1, setTotal: 13, restEndTime: null,
+      });
+      return calls;
+    }, opts);
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#app');
+  });
+
+  test('with no card on screen it just starts one', async ({ page }) => {
+    expect(await run(page, { listed: [], adoptAfter: 0 })).toEqual<Call[]>(['list', 'start']);
+  });
+
+  test('a card left from before a relaunch is ended once the plugin adopts it, then a new one starts', async ({ page }) => {
+    expect(await run(page, { listed: ['active'], adoptAfter: 2 })).toEqual<Call[]>([
+      'list', 'isRunning', 'isRunning', 'isRunning', 'end', 'start',
+    ]);
+  });
+
+  test('dismissed or ended cards are not on screen, so they are left alone', async ({ page }) => {
+    expect(await run(page, { listed: ['dismissed', 'ended'], adoptAfter: 0 })).toEqual<Call[]>(['list', 'start']);
+  });
+
+  test('a listed card the plugin never adopts is not duplicated', async ({ page }) => {
+    const calls = await run(page, { listed: ['active'], adoptAfter: 1_000 });
+    expect(calls).not.toContain('start');
+    expect(calls.at(-1)).toBe('update');
+  });
+});
+
 test.describe('Native data export', () => {
   // The share sheet counts every item it's given. Passing the same file as
   // both `url` and `files` showed "2 Documents" and saved two identical
@@ -560,6 +620,65 @@ test.describe('Native data export', () => {
 });
 
 test.describe('Native OTA update check', () => {
+  async function deferredCheck(page: import('@playwright/test').Page) {
+    return page.evaluate(async () => {
+      const { checkForOtaUpdate } = await import('/src/native/otaUpdate.ts');
+      const { getAllLogs } = await import('/src/logic/logger.ts');
+      await checkForOtaUpdate();
+      return (await getAllLogs()).filter((l) => l.message.startsWith('ota ')).map((l) => `${l.message} ${l.context ?? ''}`.trim());
+    });
+  }
+
+  async function mockManifest(page: import('@playwright/test').Page) {
+    await page.addInitScript(() => {
+      (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.endsWith('/ota/workout-tracker/update.json')) {
+          return new Response(JSON.stringify({ version: 'test-version', url: 'https://example.com/dist.zip' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return originalFetch(input, init);
+      };
+    });
+  }
+
+  // Applying an update reloads the WebView. Launched in the background (a
+  // watch tap or a watch-started workout), that reload doesn't finish until
+  // the app is opened, which is a blank screen, and it drops whatever the
+  // page hadn't saved yet. Mid-workout it would interrupt the workout.
+  test('a launch in the background defers the update', async ({ page }) => {
+    await mockManifest(page);
+    await page.addInitScript(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    });
+    const consoleMessages: string[] = [];
+    page.on('console', (msg) => consoleMessages.push(msg.text()));
+    await page.goto('/');
+    await page.waitForSelector('#app');
+
+    expect(await deferredCheck(page)).toContain('ota update deferred version=test-version reason=background');
+    expect(consoleMessages.some((m) => m.includes('Cannot download version in web'))).toBe(false);
+  });
+
+  test('a workout in progress defers the update', async ({ page }) => {
+    await mockManifest(page);
+    const consoleMessages: string[] = [];
+    page.on('console', (msg) => consoleMessages.push(msg.text()));
+    await page.goto('/');
+    await page.click('#start-workout-btn');
+    await page.waitForSelector('.workout-screen');
+    await page.click('[data-testid="done-set-btn"]');
+    // The check at launch (no workout yet) went ahead; only this one counts.
+    consoleMessages.length = 0;
+
+    expect(await deferredCheck(page)).toContain('ota update deferred version=test-version reason=workout');
+    expect(consoleMessages.some((m) => m.includes('Cannot download version in web'))).toBe(false);
+  });
+
   test('checks the self-hosted manifest and applies an update via CapacitorUpdater', async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { CapacitorCustomPlatform: unknown }).CapacitorCustomPlatform = { name: 'ios' };

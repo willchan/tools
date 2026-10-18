@@ -1,5 +1,6 @@
 import { isNativePlatform } from './platform';
 import { log } from '../logic/logger';
+import { getActiveWorkout } from '../db/database';
 
 // Static JSON manifest published by .github/workflows/deploy.yml alongside
 // the PWA build. GitHub Pages only serves plain GETs, which is why this
@@ -28,6 +29,18 @@ export async function checkForOtaUpdate(): Promise<void> {
 
     const { bundle } = await CapacitorUpdater.current();
     if (!manifest.version || manifest.version === bundle.version) return;
+
+    // Applying an update reloads the WebView. Launched in the background (by
+    // a watch tap or a watch-started workout), that reload doesn't finish
+    // until the app is opened: a blank screen, and the page loses whatever it
+    // hadn't saved yet. Mid-workout it would interrupt the workout. Either
+    // way, leave it for the next launch.
+    const reason =
+      document.visibilityState === 'hidden' ? 'background' : (await getActiveWorkout()) ? 'workout' : null;
+    if (reason) {
+      await log('info', 'ota update deferred', `version=${manifest.version} reason=${reason}`);
+      return;
+    }
 
     const next = await CapacitorUpdater.download({ url: manifest.url, version: manifest.version });
     await CapacitorUpdater.set({ id: next.id });

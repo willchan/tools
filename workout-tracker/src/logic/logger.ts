@@ -67,11 +67,7 @@ export function installGlobalErrorHandlers(): void {
           ? reason
           : safeStringify(reason);
     const stack = reason instanceof Error ? reason.stack : undefined;
-    // idb rejects every transaction's `done` promise when it aborts, and
-    // nothing awaits it for reads, so each IndexedDB transaction iOS aborts
-    // around a suspend adds one of these. The request that failed reports
-    // itself; this duplicate is a warning, not a badge-worthy error.
-    const level = isAbortError(reason) ? 'warn' : 'error';
+    const level = isTransientIdbError(reason) ? 'warn' : 'error';
     void log(level, `Unhandled rejection: ${message}`, undefined, stack).catch(() => {});
   });
 
@@ -83,8 +79,19 @@ export function installGlobalErrorHandlers(): void {
   });
 }
 
-function isAbortError(reason: unknown): boolean {
-  return typeof DOMException !== 'undefined' && reason instanceof DOMException && reason.name === 'AbortError';
+/**
+ * An IndexedDB request or transaction that iOS cut off by suspending the app
+ * (WebKit tears down transactions in flight; on resume they fail with an
+ * AbortError, or "... without an in-progress transaction"). Nothing is lost:
+ * the write didn't happen and is retried (a watch tap stays in the native
+ * queue, a timer poll reads again), so these are warnings, not errors for
+ * the Settings badge. idb also rejects every aborted transaction's `done`
+ * promise, which nothing awaits for reads: that's most unhandled AbortErrors.
+ */
+export function isTransientIdbError(reason: unknown): boolean {
+  if (typeof DOMException === 'undefined' || !(reason instanceof DOMException)) return false;
+  if (reason.name === 'AbortError') return true;
+  return reason.name === 'InvalidStateError' && reason.message.includes('without an in-progress transaction');
 }
 
 function safeStringify(value: unknown): string {
