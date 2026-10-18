@@ -17,6 +17,10 @@ import { readFileSync } from "node:fs";
 const API = "https://api.appstoreconnect.apple.com/v1";
 const POLL_INTERVAL_MS = 30_000;
 const POLL_TIMEOUT_MS = 30 * 60_000;
+// A build uploaded before this script started by more than this is an older
+// build that happens to share the number, not the one just uploaded.
+const MAX_UPLOAD_AGE_MS = 60 * 60_000;
+const startedAt = Date.now();
 
 const [bundleId, buildNumber] = process.argv.slice(2);
 const { ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, TESTFLIGHT_GROUPS } = process.env;
@@ -81,6 +85,10 @@ for (;;) {
   [build] = (await api(`/builds?filter[app]=${app.id}&filter[version]=${q(buildNumber)}&limit=1`))!.data;
   const state = build?.attributes.processingState ?? "NOT_FOUND";
   console.log(`Build ${buildNumber}: ${state}`);
+  const uploaded = Date.parse(String(build?.attributes.uploadedDate));
+  if (build && startedAt - uploaded > MAX_UPLOAD_AGE_MS) {
+    throw new Error(`Build ${buildNumber} was uploaded ${build.attributes.uploadedDate}, not just now; wrong build number?`);
+  }
   if (state === "VALID") break;
   if (state === "FAILED" || state === "INVALID") throw new Error(`Build ${buildNumber} is ${state}`);
   if (Date.now() > deadline) throw new Error(`Build ${buildNumber} still ${state} after 30 min`);

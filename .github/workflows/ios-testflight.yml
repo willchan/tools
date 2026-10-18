@@ -173,10 +173,15 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
           TESTFLIGHT_GROUPS: Me
+        # Read from the exported .ipa, not the archive: the project's
+        # CURRENT_PROJECT_VERSION stays at 1 and the app-store export bumps
+        # the build number past the last upload, so only the .ipa has the
+        # number App Store Connect knows this build by.
         run: |
-          PROPS=ios/App/build/App.xcarchive/Info.plist
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleIdentifier" "$PROPS")
-          BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$PROPS")
+          PROPS="$RUNNER_TEMP/Info.plist"
+          unzip -p ios/App/build/ipa/App.ipa 'Payload/*.app/Info.plist' > "$PROPS"
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PROPS")
+          BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PROPS")
           bun ios/scripts/assign-testflight-groups.ts "$BUNDLE_ID" "$BUILD_NUMBER"
 
       - name: Clean up keychain
