@@ -8,27 +8,31 @@ import XCTest
 final class WorkoutLogicEngineTests: XCTestCase {
     private let stub = """
     var WorkoutLogic = {
-      probe: function (eventJSON, now) {
-        var event = JSON.parse(eventJSON);
-        return JSON.stringify({ verdict: 'apply', id: event.id, now: now });
+      answer: function (shadowJSON, eventsJSON, seq, now) {
+        var shadow = JSON.parse(shadowJSON);
+        var events = JSON.parse(eventsJSON);
+        return JSON.stringify({ day: shadow.dayName, ids: events.map(function (e) { return e.id; }), seq: seq, now: now });
       }
     };
     """
 
-    func testProbePassesTheTapAndClockAndReturnsTheJSON() throws {
+    func testAnswerPassesTheShadowTapsSeqAndClockAndReturnsTheJSON() throws {
         let engine = try WorkoutLogicEngine(script: stub)
-        let result = try engine.probe(eventJSON: #"{"id":"tap-1"}"#, now: 1_792_270_000_000)
+        let result = try engine.answer(
+            shadowJSON: #"{"dayName":"OHP Day"}"#, eventsJSON: #"[{"id":"tap-1"},{"id":"tap-2"}]"#,
+            seq: 1_792_270_000_001, now: 1_792_270_000_000)
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
-        XCTAssertEqual(object["verdict"] as? String, "apply")
-        XCTAssertEqual(object["id"] as? String, "tap-1")
+        XCTAssertEqual(object["day"] as? String, "OHP Day")
+        XCTAssertEqual(object["ids"] as? [String], ["tap-1", "tap-2"])
+        XCTAssertEqual(object["seq"] as? Double, 1_792_270_000_001)
         XCTAssertEqual(object["now"] as? Double, 1_792_270_000_000)
     }
 
     func testTheEngineCanBeCalledAgain() throws {
         let engine = try WorkoutLogicEngine(script: stub)
-        let first = try engine.probe(eventJSON: #"{"id":"a"}"#, now: 1)
-        let second = try engine.probe(eventJSON: #"{"id":"a"}"#, now: 1)
+        let first = try engine.answer(shadowJSON: "{}", eventsJSON: "[]", seq: 1, now: 1)
+        let second = try engine.answer(shadowJSON: "{}", eventsJSON: "[]", seq: 1, now: 1)
         XCTAssertEqual(first, second)
     }
 
@@ -52,27 +56,27 @@ final class WorkoutLogicEngineTests: XCTestCase {
 
     func testAScriptWithoutTheAPIIsAnError() throws {
         let engine = try WorkoutLogicEngine(script: "var Other = {};")
-        XCTAssertThrowsError(try engine.probe(eventJSON: "{}", now: 0)) { error in
-            XCTAssertEqual(error as? WorkoutLogicEngine.Error, .missingFunction("probe"))
+        XCTAssertThrowsError(try engine.answer(shadowJSON: "{}", eventsJSON: "[]", seq: 0, now: 0)) { error in
+            XCTAssertEqual(error as? WorkoutLogicEngine.Error, .missingFunction("answer"))
         }
     }
 
     func testAThrowingCallIsAnErrorAndTheNextCallStillWorks() throws {
         let engine = try WorkoutLogicEngine(script: """
-        var WorkoutLogic = { probe: function (e) { if (e === 'bad') throw new Error('nope'); return 'ok'; } };
+        var WorkoutLogic = { answer: function (s) { if (s === 'bad') throw new Error('nope'); return 'ok'; } };
         """)
-        XCTAssertThrowsError(try engine.probe(eventJSON: "bad", now: 0)) { error in
+        XCTAssertThrowsError(try engine.answer(shadowJSON: "bad", eventsJSON: "[]", seq: 0, now: 0)) { error in
             guard case WorkoutLogicEngine.Error.exception(let message) = error else {
                 return XCTFail("unexpected \(error)")
             }
             XCTAssertTrue(message.contains("nope"), message)
         }
-        XCTAssertEqual(try engine.probe(eventJSON: "good", now: 0), "ok")
+        XCTAssertEqual(try engine.answer(shadowJSON: "good", eventsJSON: "[]", seq: 0, now: 0), "ok")
     }
 
     func testANonStringResultIsAnError() throws {
-        let engine = try WorkoutLogicEngine(script: "var WorkoutLogic = { probe: function () { return 42; } };")
-        XCTAssertThrowsError(try engine.probe(eventJSON: "{}", now: 0)) { error in
+        let engine = try WorkoutLogicEngine(script: "var WorkoutLogic = { answer: function () { return 42; } };")
+        XCTAssertThrowsError(try engine.answer(shadowJSON: "{}", eventsJSON: "[]", seq: 0, now: 0)) { error in
             XCTAssertEqual(error as? WorkoutLogicEngine.Error, .notAString)
         }
     }

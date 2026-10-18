@@ -114,6 +114,26 @@ test.describe('Apple Watch bridge — native', () => {
     expect((await recorded(page)).startWatchAppCalls).toBe(1);
   });
 
+  test('every snapshot push carries the shadow the native side answers taps from', async ({ page }) => {
+    await startWorkout(page);
+    await latestSnapshot(page);
+    const shadows = () =>
+      page.evaluate(async () => {
+        const { watchBridgeWeb } = await import('/src/native/watchBridgeWeb.ts');
+        return (await watchBridgeWeb.getRecorded()).shadows.map((sh) =>
+          sh ? { index: sh.session.currentSetIndex, day: sh.dayName, tm: sh.ctx.tmMap.length > 0 } : null,
+        );
+      });
+    expect((await shadows()).at(-1)).toEqual({ index: 0, day: expect.any(String), tm: true });
+
+    await page.click('[data-testid="done-set-btn"]');
+    await expect.poll(async () => (await shadows()).at(-1)?.index).toBe(1);
+
+    await page.click('#skip-timer-btn');
+    await page.click('#back-btn');
+    await expect.poll(async () => (await shadows()).at(-1)).toBeNull();
+  });
+
   test('a phone tap pushes a fresh snapshot with a higher seq', async ({ page }) => {
     await startWorkout(page);
     const first = await latestSnapshot(page);

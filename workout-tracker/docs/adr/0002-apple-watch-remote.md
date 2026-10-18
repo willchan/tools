@@ -2,8 +2,9 @@
 
 - **Status:** Accepted, 2026-09. Steps 1 (TS), 2 (native `WatchBridge`,
   `AppLogic` on iOS + watchOS) and 3 (the watch app) are implemented. Step 4
-  (real workouts) confirmed JS suspension; the JavaScriptCore fallback is
-  being measured (see "Background taps").
+  (real workouts) confirmed JS suspension, so the phone answers watch taps
+  natively with the same reducer in JavaScriptCore (see "Background
+  taps").
 - **Related:** [0001](0001-web-first-with-capacitor-shell.md)
 
 ## Context
@@ -188,19 +189,41 @@ So the fallback above goes ahead: the native side answers taps itself by
 running the same TS reducer in JavaScriptCore, while IndexedDB stays the
 source of truth and the WebView applies the queued taps when it runs.
 
-**First, a measurement.** `src/native/workoutLogicBundle.ts` is built by
+**Measured first.** A build that ran each tap through the bundle without
+sending the result (2026-10-18, OHP Day: 21 taps, 18 with the app in the
+background) could have answered in 94–181 ms from the tap, the reducer
+itself taking 4–16 ms, plus ~150 ms the first time the bundle loads. Each
+background wake had ~30 s of runtime. Nearly every background tap reached
+the phone over `transferUserInfo`, which has no reply, so answers are
+pushed rather than returned.
+
+**How it works.** `src/native/workoutLogicBundle.ts` is built by
 `vite.logic.config.ts` into `dist/native/workout-logic.js`, an IIFE that
 runs with no DOM (checked in `e2e/workout-logic-bundle.spec.ts`), and ships
-in the app binary via `cap sync`; OTA web updates don't replace it.
-`WatchConnectivityCoordinator` runs each newly queued tap through its
-`probe()` (the real `checkWatchEvent` → `applySessionEvent` →
-`buildWatchSnapshot`, against a fixed session) with AppLogic's
-`WorkoutLogicEngine`, and records the timings and app state in a
-`WatchProbeLog`. Nothing computed is sent to the watch. JS copies the
-records into the app log as `watch probe` lines when it next runs.
+in the app binary via `cap sync`; OTA web updates don't replace it, so a
+change to the shadow or the reducer reaches background answers only with a
+TestFlight build.
 
-The test: lock the phone and pocket it for 10+ minutes, then about 20 taps
-over 30 minutes. It passes if every tap has a `watch probe` line with
-`tapToReplyMs` under about 1 s at p95. If it passes, the next step is a
-shadow state: the WebView pushes its session state to native after each
-commit, and native answers taps from it with a real snapshot.
+- With every snapshot, the WebView pushes a *shadow* of its session
+  (`encodeWatchShadow`: the `WatchSnapshotSource` as plain JSON, null when
+  idle).
+- When a tap is queued, AppLogic's `WatchAnswerer` runs
+  `answerWatchEvents` (via `WorkoutLogicEngine`, JavaScriptCore) over the
+  shadow and every tap still in the native queue, and
+  `WatchConnectivityCoordinator` sends the snapshot: application context,
+  a message when the watch app is in front, and the `sendMessage` reply
+  when there is one. Taps the WebView already applied are duplicates, and
+  `start` is left to the WebView.
+- A WebView push while taps are still queued is replaced by the answer
+  over them, so a WebView that hasn't applied them yet can't take the
+  watch back. `WatchAnswerer` also keeps `seq` strictly increasing across
+  its answers and the WebView's pushes.
+- IndexedDB stays the source of truth. The WebView applies the same taps
+  through the same reducer when it runs, gets the same state, and acks
+  them. `e2e/watch-protocol.spec.ts` checks an answer equals what the
+  WebView computes.
+- Timings go to `WatchProbeLog`; JS copies them into the app log as
+  `watch probe` lines.
+
+**Known gap:** the shadow lives in memory, so after the app process is
+killed the first tap waits for the WebView to push one.

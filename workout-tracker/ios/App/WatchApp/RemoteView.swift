@@ -6,7 +6,7 @@ import AppLogic
 /// One fixed screen, no scrolling: on a watch the Digital Crown would
 /// otherwise both scroll and adjust whatever control is focused (it changed
 /// the rep count when it was meant to scroll). Set number in the title bar,
-/// then exercise, weight, a compact middle row (reps, or the rest countdown
+/// then exercise, weight (and reps toward a rep-total target), a compact middle row (reps, or the rest countdown
 /// while rest locks Done), and one big button whose job WatchRemoteState
 /// decides: Done, Skip Rest or Finish.
 struct RemoteView: View {
@@ -87,6 +87,14 @@ struct RemoteView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                if let volume = w.volume {
+                    // The set's rep-total target, as the phone shows it.
+                    Text(volume.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
             }
 
             Spacer(minLength: 2)

@@ -103,6 +103,7 @@ final class WatchProtocolTests: XCTestCase {
         XCTAssertNil(workout.restEndTime)
         XCTAssertFalse(workout.restLocksDone)
         XCTAssertEqual(workout.restAfterSetSeconds, 120)
+        XCTAssertNil(workout.volume)
     }
 
     func testDecodesRestingSnapshot() throws {
@@ -111,6 +112,28 @@ final class WatchProtocolTests: XCTestCase {
         XCTAssertEqual(workout.restEndTime, 1_759_100_180_000)
         XCTAssertNil(workout.plateLabel)
         XCTAssertNil(workout.restAfterSetSeconds)
+        XCTAssertEqual(workout.volume, WatchVolumeProgress(done: 0, target: 30))
+        XCTAssertEqual(workout.volume?.remaining, 30)
+    }
+
+    /// A phone running web code from before the field still talks to a
+    /// newer watch: no `volume` key decodes as nil.
+    func testSnapshotWithoutVolumeDecodes() throws {
+        var object = try XCTUnwrap(Fixture.object("snapshot-active-resting.json") as? [String: Any])
+        var workout = try XCTUnwrap(object["workout"] as? [String: Any])
+        workout.removeValue(forKey: "volume")
+        object["workout"] = workout
+        let snapshot = try JSONDecoder().decode(
+            WatchSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(snapshot.workout?.volume)
+    }
+
+    func testVolumeRemainingIsNeverNegative() {
+        XCTAssertEqual(WatchVolumeProgress(done: 33, target: 30).remaining, 0)
+    }
+
+    func testVolumeLabel() {
+        XCTAssertEqual(WatchVolumeProgress(done: 30, target: 50).label, "30/50 · 20 to go")
     }
 
     func testDecodesIdleSnapshot() throws {

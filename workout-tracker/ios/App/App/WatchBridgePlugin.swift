@@ -43,7 +43,12 @@ public class WatchBridgePlugin: CAPPlugin, CAPBridgedPlugin {
             return call.reject("snapshot is required")
         }
         do {
-            try coordinator.push(WatchSnapshot(jsObject: object))
+            // Kept as JSON for the reducer bundle; JS sends null when idle.
+            var shadowJSON: String?
+            if let shadow = call.options["shadow"], !(shadow is NSNull) {
+                shadowJSON = String(decoding: try JSONSerialization.data(withJSONObject: shadow), as: UTF8.self)
+            }
+            try coordinator.push(WatchSnapshot(jsObject: object), shadowJSON: shadowJSON)
             call.resolve()
         } catch {
             call.reject("pushSnapshot failed: \(error)", nil, error)
@@ -72,7 +77,7 @@ public class WatchBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// The background-tap experiment's timings since the last call (see
+    /// Timings of taps answered natively since the last call (see
     /// WatchConnectivityCoordinator); JS copies them into the app log.
     @objc func drainProbeResults(_ call: CAPPluginCall) {
         do {

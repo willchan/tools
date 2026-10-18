@@ -47,10 +47,13 @@ final class PhoneLink: NSObject, WCSessionDelegate {
     private func deliver(_ message: [String: Any], on session: WCSession) {
         session.transferUserInfo(message)
         guard session.isReachable else { return }
-        session.sendMessage(message, replyHandler: { reply in
+        session.sendMessage(message, replyHandler: { [weak self] reply in
             if WatchMessage.ackedID(in: reply) == nil {
                 log.error("phone did not queue a tap; the transfer will retry it")
             }
+            // The phone answers the tap itself when it can (ADR 0002,
+            // "Background taps"); the reply then carries the snapshot.
+            self?.forward(reply)
         }, errorHandler: { error in
             log.info("sendMessage failed, relying on the transfer: \(error.localizedDescription, privacy: .public)")
         })
@@ -82,5 +85,20 @@ final class PhoneLink: NSObject, WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         forward(applicationContext)
+    }
+
+    /// The phone also sends each snapshot as a message while this app is in
+    /// front: it arrives sooner than the context. Older ones are dropped by
+    /// WatchRemoteState's seq check, whichever way they came.
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        forward(message)
+    }
+
+    func session(
+        _ session: WCSession, didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        forward(message)
+        replyHandler([:])
     }
 }

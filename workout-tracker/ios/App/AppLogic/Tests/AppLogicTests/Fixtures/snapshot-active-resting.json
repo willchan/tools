@@ -17,6 +17,10 @@
     "isBonus": false,
     "restEndTime": 1759100180000,
     "restLocksDone": false,
-    "restAfterSetSeconds": null
+    "restAfterSetSeconds": null,
+    "volume": {
+      "done": 0,
+      "target": 30
+    }
   }
 }

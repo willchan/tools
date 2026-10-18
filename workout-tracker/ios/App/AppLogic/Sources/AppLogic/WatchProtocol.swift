@@ -121,6 +121,9 @@ public struct WatchWorkoutView: Codable, Equatable, Sendable {
     /// Rest to count down locally right after Done, before the phone's next
     /// snapshot arrives. Nil means completing this set starts no rest.
     public var restAfterSetSeconds: Double?
+    /// Reps done so far toward this set's rep-total target, for sets that
+    /// have one. Nil also when a snapshot predates the field.
+    public var volume: WatchVolumeProgress?
 
     public init(
         dayName: String,
@@ -137,7 +140,8 @@ public struct WatchWorkoutView: Codable, Equatable, Sendable {
         isBonus: Bool,
         restEndTime: Double?,
         restLocksDone: Bool,
-        restAfterSetSeconds: Double?
+        restAfterSetSeconds: Double?,
+        volume: WatchVolumeProgress? = nil
     ) {
         self.dayName = dayName
         self.setId = setId
@@ -154,11 +158,12 @@ public struct WatchWorkoutView: Codable, Equatable, Sendable {
         self.restEndTime = restEndTime
         self.restLocksDone = restLocksDone
         self.restAfterSetSeconds = restAfterSetSeconds
+        self.volume = volume
     }
 
     private enum CodingKeys: String, CodingKey {
         case dayName, setId, setNumber, setTotal, allSetsDone, exerciseName, weightLabel, plateLabel
-        case reps, maxReps, isAmrap, isBonus, restEndTime, restLocksDone, restAfterSetSeconds
+        case reps, maxReps, isAmrap, isBonus, restEndTime, restLocksDone, restAfterSetSeconds, volume
     }
 
     // Decoding is synthesized. Encoding is spelled out only so nil is
@@ -181,7 +186,24 @@ public struct WatchWorkoutView: Codable, Equatable, Sendable {
         try c.encode(restEndTime, forKey: .restEndTime)
         try c.encode(restLocksDone, forKey: .restLocksDone)
         try c.encode(restAfterSetSeconds, forKey: .restAfterSetSeconds)
+        try c.encode(volume, forKey: .volume)
     }
+}
+
+/// `WatchWorkoutView.volume` in watchProtocol.ts.
+public struct WatchVolumeProgress: Codable, Equatable, Sendable {
+    public var done: Int
+    public var target: Int
+
+    public init(done: Int, target: Int) {
+        self.done = done
+        self.target = target
+    }
+
+    public var remaining: Int { max(0, target - done) }
+
+    /// What the watch shows, like the phone's "x/y reps so far · z to go".
+    public var label: String { "\(done)/\(target) · \(remaining) to go" }
 }
 
 /// `WatchSnapshot` in watchProtocol.ts: phone → watch state.
