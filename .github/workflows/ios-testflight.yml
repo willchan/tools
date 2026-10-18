@@ -179,7 +179,10 @@ jobs:
         # number App Store Connect knows this build by.
         run: |
           PROPS="$RUNNER_TEMP/Info.plist"
-          unzip -p ios/App/build/ipa/App.ipa 'Payload/*.app/Info.plist' > "$PROPS"
+          # The exact path: unzip's * also matches "/", so Payload/*.app/...
+          # would add the embedded watch app's Info.plist (and any other
+          # nested one) to the output and corrupt it.
+          unzip -p ios/App/build/ipa/App.ipa 'Payload/App.app/Info.plist' > "$PROPS"
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PROPS")
           BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PROPS")
           bun ios/scripts/assign-testflight-groups.ts "$BUNDLE_ID" "$BUILD_NUMBER"
