@@ -432,6 +432,39 @@ test.describe('Apple Watch bridge — failures reach the Settings error badge', 
     await expect(await settingsBadge(page)).toBeVisible();
   });
 
+  test('a tap whose save iOS cut off is a warning: it stays queued and is retried', async ({ page }) => {
+    await startWorkout(page);
+    const snap = await latestSnapshot(page);
+    await page.evaluate(() => {
+      const original = IDBObjectStore.prototype.put;
+      let thrown = false;
+      IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: [unknown, IDBValidKey?]) {
+        if (!thrown && this.name !== 'logs') {
+          thrown = true;
+          throw new DOMException(
+            'Attempt to put a record into database without an in-progress transaction',
+            'InvalidStateError',
+          );
+        }
+        return original.apply(this, args);
+      };
+    });
+    await emit(page, { v: 1, id: 'cut', at: Date.now(), type: 'completeSet', setId: snap.workout!.setId });
+
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const { getAllLogs } = await import('/src/logic/logger.ts');
+          return (await getAllLogs())
+            .filter((l) => l.message.startsWith('watch event failed'))
+            .map((l) => l.level);
+        }),
+      )
+      .toEqual(['warn']);
+    expect((await recorded(page)).pending.map((e) => e.id)).toEqual(['cut']);
+    expect(await newWatchErrors(page)).toEqual([]);
+  });
+
   test('applied, redelivered and stale taps are not errors', async ({ page }) => {
     await startWorkout(page);
     const before = await latestSnapshot(page);

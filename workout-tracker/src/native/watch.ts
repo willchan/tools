@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { isNativePlatform } from './platform';
 import { WatchBridge } from './watchBridge';
 import type { ReceivedWatchEvent, WatchProbeResult } from './watchBridge';
-import { log } from '../logic/logger';
+import { isTransientIdbError, log } from '../logic/logger';
 import { buildWatchSnapshot } from '../logic/watchProtocol';
 import type { WatchSnapshotSource } from '../logic/watchProtocol';
 import { getActiveWorkout } from '../db/database';
@@ -162,7 +162,12 @@ async function receive(event: ReceivedWatchEvent): Promise<void> {
     await finish(event, await current.handleEvent(event));
   } catch (err) {
     // Not acked: it stays in the native queue for the next drain.
-    logFailure('watch event failed', err, `id=${event.id} type=${event.type}`);
+    const context = `id=${event.id} type=${event.type}`;
+    if (isTransientIdbError(err)) {
+      void log('warn', `watch event failed: ${errorMessage(err)}`, context).catch(() => {});
+    } else {
+      logFailure('watch event failed', err, context);
+    }
   }
 }
 
@@ -257,5 +262,9 @@ export async function startWatchWorkout(): Promise<void> {
  * levels and never come through here.
  */
 function logFailure(message: string, err: unknown, context?: string): void {
-  void log('error', `${message}: ${err instanceof Error ? err.message : String(err)}`, context).catch(() => {});
+  void log('error', `${message}: ${errorMessage(err)}`, context).catch(() => {});
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

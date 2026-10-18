@@ -119,4 +119,41 @@ test.describe('IndexedDB suspend/resume resilience', () => {
     expect(logs).toContainEqual({ level: 'warn', message: 'Unhandled rejection: AbortError' });
     expect(logs.filter((l) => l.level === 'error')).toEqual([]);
   });
+
+  test('a write iOS cut off mid-transaction is a warning, not an error', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    const logs = await page.evaluate(async () => {
+      const { clearLogs, getAllLogs } = await import('/src/logic/logger.ts');
+      await clearLogs();
+      // What a resumed WebKit rejects a write with when its transaction was
+      // torn down during a suspend (e.g. a log entry's autoIncrement key).
+      void Promise.reject(
+        new DOMException('Attempt to generate key in database without an in-progress transaction', 'InvalidStateError'),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return (await getAllLogs()).map((l) => ({ level: l.level, message: l.message }));
+    });
+
+    expect(logs).toEqual([
+      {
+        level: 'warn',
+        message: 'Unhandled rejection: Attempt to generate key in database without an in-progress transaction',
+      },
+    ]);
+  });
+
+  test('other unhandled rejections are still errors', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#start-workout-btn');
+    const levels = await page.evaluate(async () => {
+      const { clearLogs, getAllLogs } = await import('/src/logic/logger.ts');
+      await clearLogs();
+      void Promise.reject(new DOMException('The object is in an invalid state.', 'InvalidStateError'));
+      void Promise.reject(new Error('boom'));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return (await getAllLogs()).map((l) => l.level);
+    });
+    expect(levels).toEqual(['error', 'error']);
+  });
 });
